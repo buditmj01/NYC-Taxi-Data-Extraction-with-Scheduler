@@ -450,16 +450,58 @@ Catatan: Email ini digenerate secara otomatis oleh sistem. File CSV terlampir be
 
 
 def send_to_discord(webhook_url: str, message: str) -> None:
-    """Kirim pesan ke Discord via webhook sederhana (plain content)."""
-    # Tambahkan mention untuk user samsudinde
+    """Kirim pesan ke Discord via webhook, split jika lebih dari 2000 karakter."""
+    # Discord limit: 2000 characters per message
+    MAX_LENGTH = 1900  # Leave some buffer
+
+    # Tambahkan mention untuk user samsudinde di pesan pertama
     mention_message = f"<@samsudinde>\n{message}"
-    payload = {"content": mention_message}
-    try:
-        resp = requests.post(webhook_url, json=payload, timeout=10)
-    except requests.RequestException as e:
-        raise RuntimeError(f"Gagal mengirim ke Discord: {e}")
-    if resp.status_code not in (200, 204):
-        raise RuntimeError(f"Discord returned status {resp.status_code}: {resp.text}")
+
+    # Split message jika terlalu panjang
+    if len(mention_message) <= 2000:
+        # Send as single message
+        payload = {"content": mention_message}
+        try:
+            resp = requests.post(webhook_url, json=payload, timeout=10)
+        except requests.RequestException as e:
+            raise RuntimeError(f"Gagal mengirim ke Discord: {e}")
+        if resp.status_code not in (200, 204):
+            raise RuntimeError(f"Discord returned status {resp.status_code}: {resp.text}")
+    else:
+        # Split into multiple messages
+        lines = mention_message.split('\n')
+        chunks = []
+        current_chunk = []
+        current_length = 0
+
+        for line in lines:
+            line_length = len(line) + 1  # +1 for newline
+            if current_length + line_length > MAX_LENGTH:
+                # Save current chunk and start new one
+                chunks.append('\n'.join(current_chunk))
+                current_chunk = [line]
+                current_length = line_length
+            else:
+                current_chunk.append(line)
+                current_length += line_length
+
+        # Add last chunk
+        if current_chunk:
+            chunks.append('\n'.join(current_chunk))
+
+        # Send each chunk
+        for i, chunk in enumerate(chunks):
+            payload = {"content": chunk}
+            try:
+                resp = requests.post(webhook_url, json=payload, timeout=10)
+            except requests.RequestException as e:
+                raise RuntimeError(f"Gagal mengirim ke Discord (bagian {i+1}/{len(chunks)}): {e}")
+            if resp.status_code not in (200, 204):
+                raise RuntimeError(f"Discord returned status {resp.status_code} (bagian {i+1}/{len(chunks)}): {resp.text}")
+            # Small delay between messages to avoid rate limiting
+            if i < len(chunks) - 1:
+                import time
+                time.sleep(0.5)
 
 
 def send_to_gmail(
@@ -674,7 +716,12 @@ def main() -> None:
         if send_discord:
             try:
                 send_to_discord(DISCORD_WEBHOOK_URL, discord_message)
-                print("✓ Pesan berhasil dikirim ke Discord dengan data agregasi lengkap.")
+                msg_len = len(f"<@samsudinde>\n{discord_message}")
+                if msg_len > 2000:
+                    num_parts = (msg_len // 1900) + 1
+                    print(f"✓ Pesan berhasil dikirim ke Discord ({num_parts} bagian) dengan data agregasi lengkap.")
+                else:
+                    print("✓ Pesan berhasil dikirim ke Discord dengan data agregasi lengkap.")
                 success_count += 1
             except Exception as e:
                 error_msg = f"✗ Gagal mengirim ke Discord: {e}"
