@@ -1,0 +1,444 @@
+NYC Taxi Data Pipeline - File Structure (Python Only Version)
+==============================================================
+
+/Users/budi.triatmojo/Documents/Capstone 1/
+│
+├── 🚀 MAIN SCRIPTS
+│   ├── data_pipeline.py ⭐              # PySpark ETL pipeline (OOP, CSV output)
+│   ├── data_extraction.py               # Weekly data extraction (Parquet output)
+│   ├── send_daily_report.py             # Discord + Gmail reporting
+│   └── view_parquet.py                  # Parquet file viewer utility
+│
+├── 🔧 CONFIGURATION
+│   ├── config.py                        # Environment loader
+│   ├── .env ⚠️                          # Credentials (keep secure!)
+│   └── .env.example                     # Environment template
+│
+├── 📊 DATA DIRECTORIES
+│   ├── data/
+│   │   ├── raw/ 📥                     # Input parquet files
+│   │   │   ├── green_tripdata_2025-09.parquet
+│   │   │   └── yellow_tripdata_2025-09.parquet
+│   │   └── processed/ 📤              # Processed parquet files
+│   │       └── combined_tripdata_2025_week36.parquet
+│   │
+│   └── output/ 📊                      # CSV aggregation results
+│       ├── trips_per_day.csv/
+│       ├── revenue_per_day.csv/
+│       ├── peak_hour_per_day.csv/
+│       ├── daily_avg_metrics.csv/
+│       └── anomaly_monitoring.csv/
+│
+├── 📖 DATA DOCUMENTATION
+│   └── data_dictionary/                 # Data schema documentation
+│
+├── 📁 PROJECT DOCUMENTATION
+│   └── PROJECT_STRUCTURE.txt 📁        # This file
+│
+└── 🐍 PYTHON ENVIRONMENT
+    └── .venv/                           # Virtual environment
+
+
+========================================
+KEY FILES EXPLAINED
+========================================
+
+🚀 data_pipeline.py (MAIN ETL PIPELINE - OOP ARCHITECTURE)
+-----------------------------------------------------------
+Purpose: Production-grade PySpark ETL pipeline with OOP design
+Input:   Green + Yellow taxi parquet files (September 2025)
+Output:  5 CSV aggregation files in output/ directory
+
+Architecture:
+- Strategy Pattern: Pluggable aggregation strategies
+- Builder Pattern: Fluent API for engine configuration
+- Dependency Injection: Configurable pipeline components
+- SOLID Principles: Single responsibility, extensibility
+
+15 Classes Implemented:
+1. PipelineConfig - Immutable configuration (dataclass)
+2. DataLoader - Data ingestion with validation
+3. SchemaTransformer (ABC) - Abstract schema transformer
+4. GreenTaxiTransformer - Green taxi normalization
+5. YellowTaxiTransformer - Yellow taxi normalization
+6. DataCleaner - Data validation & cleaning
+7. AggregationStrategy (ABC) - Abstract aggregation base
+8. TripsPerDayAggregation - Trip count aggregation
+9. RevenuePerDayAggregation - Revenue aggregation
+10. PeakHourAggregation - Peak hour detection
+11. DailyAvgMetricsAggregation - Average metrics
+12. AnomalyDetectionAggregation - Anomaly detection
+13. AggregationEngine - Strategy orchestrator
+14. OutputManager - CSV output handling
+15. NYCTaxiPipeline - Main pipeline orchestrator
+
+Pipeline Steps:
+1. Load Green + Yellow taxi data
+2. Normalize schemas (unify column names)
+3. Combine datasets
+4. Add trip duration calculation
+5. Clean data (remove invalid rows)
+6. Compute aggregations:
+   - Trips per day
+   - Revenue per day
+   - Peak hours per day
+   - Daily average metrics
+   - Anomaly detection (statistical analysis)
+7. Save to CSV files (5 files)
+
+Output Files:
+- trips_per_day.csv         (~60 rows)
+- revenue_per_day.csv       (~60 rows)
+- peak_hour_per_day.csv     (~60 rows)
+- daily_avg_metrics.csv     (~60 rows)
+- anomaly_monitoring.csv    (~60 rows)
+
+Run: python data_pipeline.py
+
+
+🔄 data_extraction.py (WEEKLY EXTRACTION)
+------------------------------------------
+Purpose: Extract and filter weekly data
+Input:   Green + Yellow taxi parquet files
+Filter:  Week 36, 2025
+Output:  combined_tripdata_2025_week36.parquet
+
+Run: python data_extraction.py
+
+
+📧 send_daily_report.py (REPORTING)
+------------------------------------
+Purpose: Send operational reports
+Output:  Discord webhook + Gmail SMTP
+Format:  Formatted messages with data summaries
+
+Features:
+- Discord integration (webhook)
+- Gmail SMTP (HTML emails)
+- Date parameter support (--date YYYY-MM-DD)
+- Dry-run mode (--dry-run)
+- Channel selection (--discord-only, --gmail-only)
+
+Run: python send_daily_report.py --date 2025-09-01
+
+
+🔍 view_parquet.py (UTILITY)
+-----------------------------
+Purpose: View parquet file contents
+Display:
+- Schema and data types
+- Sample rows (first 5)
+- Total row counts
+
+Run: python view_parquet.py
+
+
+========================================
+CONFIGURATION FILES
+========================================
+
+📝 .env (CREDENTIALS - KEEP SECURE!)
+-------------------------------------
+Contains:
+- Discord webhook URL
+- Gmail SMTP credentials (sender email, app password)
+- Gmail recipient emails
+
+IMPORTANT: Keep this file secure and never share!
+
+
+📝 .env.example (TEMPLATE)
+---------------------------
+Template for .env file
+Copy and fill in your credentials:
+  cp .env.example .env
+
+
+📝 config.py (ENVIRONMENT LOADER)
+----------------------------------
+Functions:
+- load_env_file(): Loads .env file
+- Auto-loads environment variables on import
+
+
+========================================
+DATA ARCHITECTURE (PYTHON ONLY)
+========================================
+
+┌─────────────────────────────────────────────────┐
+│           INPUT (Parquet Files)                  │
+│  data/raw/green_tripdata_2025-09.parquet        │
+│  data/raw/yellow_tripdata_2025-09.parquet       │
+└──────────────────┬──────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────┐
+│     PROCESSING (PySpark Pipeline - OOP)          │
+│  • DataLoader: Read parquet files               │
+│  • SchemaTransformer: Normalize schemas          │
+│  • DataCleaner: Clean data                       │
+│  • AggregationEngine: Compute aggregations       │
+│  • OutputManager: Save results                   │
+└──────────────────┬──────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────┐
+│          OUTPUT (Local Files Only)               │
+│                                                  │
+│  CSV Files (output/):                            │
+│  • trips_per_day.csv                            │
+│  • revenue_per_day.csv                          │
+│  • peak_hour_per_day.csv                        │
+│  • daily_avg_metrics.csv                        │
+│  • anomaly_monitoring.csv                       │
+│                                                  │
+│  Parquet File (data/processed/):                │
+│  • combined_tripdata_2025_week36.parquet        │
+└─────────────────────────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────┐
+│           REPORTING (Optional)                   │
+│  • Discord webhook notification                  │
+│  • Gmail HTML email report                      │
+└─────────────────────────────────────────────────┘
+
+
+========================================
+REMOVED FEATURES
+========================================
+
+🗑️ PostgreSQL Integration - REMOVED
+   - No database tables
+   - No JDBC writes
+   - No database configuration
+   - Deleted files:
+     * setup_raw_data_warehouse.sql
+     * POSTGRES_RAW_DATA_GUIDE.md
+     * POSTGRES_RAW_DATA_QUICKREF.md
+
+🗑️ Docker Configuration - REMOVED
+   - All Docker references removed
+
+🗑️ Shell Scripts - REMOVED
+   - No run_pipeline.sh
+   - No setup_env.sh
+   - Deleted files:
+     * run_pipeline.sh
+     * setup_env.sh
+
+🗑️ Scheduling Configuration - REMOVED
+   - No cron configuration
+   - No systemd timers
+   - Deleted files:
+     * cron_config.txt
+     * systemd/ (entire directory)
+     * SCHEDULING_GUIDE.md
+     * SCHEDULING_SUMMARY.md
+
+🗑️ Logging Directory - REMOVED
+   - No logs/ directory
+   - Logs output to console only
+   - Deleted files:
+     * logs/ (entire directory)
+
+🗑️ Git Configuration - REMOVED
+   - No .gitignore file
+   - Deleted files:
+     * .gitignore
+     * .gitignore_scheduling
+
+
+========================================
+QUICK START GUIDE
+========================================
+
+1. Activate Virtual Environment
+--------------------------------
+cd "/Users/budi.triatmojo/Documents/Capstone 1"
+source .venv/bin/activate
+
+
+2. Run Individual Scripts
+--------------------------
+# Main pipeline (OOP version)
+python data_pipeline.py
+
+# Weekly extraction
+python data_extraction.py
+
+# Send report
+python send_daily_report.py --date 2025-09-01
+
+# View parquet data
+python view_parquet.py
+
+
+3. Check Output Files
+---------------------
+ls -lh output/
+ls -lh data/processed/
+
+
+========================================
+USEFUL COMMANDS
+========================================
+
+# Testing
+python data_pipeline.py                         # Run ETL pipeline
+python send_daily_report.py --date 2025-09-01  # Test reporting
+python view_parquet.py                          # View data
+
+# Output verification
+ls -lh output/                                  # Check CSV files
+ls -lh data/processed/                          # Check parquet files
+head output/trips_per_day.csv/part-*.csv        # View CSV content
+
+
+========================================
+VERIFICATION CHECKLIST
+========================================
+
+✅ Python scripts working (local output only)
+✅ Virtual environment configured
+✅ Environment variables (.env)
+✅ PostgreSQL integration removed
+✅ Docker references removed
+✅ Shell scripts removed
+✅ Scheduling configs removed
+✅ Logs directory removed
+✅ .gitignore removed
+✅ OOP architecture implemented
+✅ Unused code cleaned up
+
+
+========================================
+FILE SIZES (Approximate)
+========================================
+
+PYTHON SCRIPTS:
+data_pipeline.py           ~22 KB  (PySpark ETL - OOP)
+data_extraction.py         ~7 KB   (Weekly extraction)
+send_daily_report.py       ~14 KB  (Reporting)
+view_parquet.py            ~2 KB   (Utility)
+config.py                  ~1 KB   (Config loader)
+
+CONFIGURATION:
+.env                       ~500 B  (Credentials)
+.env.example               ~800 B  (Template)
+
+DOCUMENTATION:
+PROJECT_STRUCTURE.txt      ~8 KB   (This file)
+
+
+========================================
+DEPENDENCIES
+========================================
+
+Python Packages (requirements.txt):
+- pyspark                    # PySpark for ETL
+- requests                   # HTTP for Discord webhook
+- python-dotenv              # Environment variable loader (optional)
+
+No external services required:
+- ❌ No PostgreSQL database
+- ❌ No Docker containers
+- ❌ No scheduling services
+- ✅ Pure Python & local file processing
+
+
+========================================
+TROUBLESHOOTING
+========================================
+
+Issue: "ModuleNotFoundError: No module named 'pyspark'"
+Solution:
+  source .venv/bin/activate
+  pip install pyspark
+
+Issue: "FileNotFoundError: Parquet file not found"
+Solution:
+  Ensure input files exist:
+  ls -lh data/raw/
+
+Issue: "No output files generated"
+Solution:
+  Check console output for errors
+  Verify data/raw/ contains input files
+
+Issue: "Discord/Gmail not working"
+Solution:
+  1. Check .env file exists
+  2. Verify credentials in .env
+  3. Test with --dry-run flag:
+     python send_daily_report.py --dry-run --date 2025-09-01
+
+
+========================================
+PROJECT STATUS
+========================================
+
+✅ Version: 3.0 (Python Only - OOP)
+✅ Architecture: Object-oriented with design patterns
+✅ Database: None (removed PostgreSQL)
+✅ Docker: None (removed)
+✅ Shell Scripts: None (removed)
+✅ Scheduling: None (removed - manual execution only)
+✅ Logging: Console output only (no log files)
+✅ Output: CSV + Parquet files
+✅ Reporting: Discord + Gmail (optional)
+✅ Code Quality: Production-grade OOP implementation
+
+
+========================================
+OOP DESIGN PATTERNS IMPLEMENTED
+========================================
+
+1. Strategy Pattern
+   - AggregationStrategy ABC
+   - 5 concrete aggregation implementations
+   - Easy to add new aggregations
+
+2. Builder Pattern
+   - AggregationEngine with method chaining
+   - Fluent API: engine.register_strategy().register_strategy()
+
+3. Dependency Injection
+   - NYCTaxiPipeline accepts optional config
+   - Testable and configurable
+
+4. SOLID Principles
+   - Single Responsibility: Each class has one job
+   - Open/Closed: Easy to extend without modifying
+   - Liskov Substitution: All strategies interchangeable
+   - Interface Segregation: Small, focused interfaces
+   - Dependency Inversion: Depends on abstractions
+
+
+========================================
+NEXT STEPS
+========================================
+
+1. Test the pipeline:
+   python data_pipeline.py
+
+2. Verify output files:
+   ls -lh output/
+   head output/trips_per_day.csv/part-*.csv
+
+3. Test reporting (optional):
+   python send_daily_report.py --date 2025-09-01
+
+
+========================================
+
+ALL FILES READY! 🎉
+
+Your NYC Taxi Data Pipeline is now a clean, Python-only version!
+- No PostgreSQL, no Docker, no shell scripts
+- Production-grade OOP architecture
+- Pure Python with local file processing
+
+Generated: 2025-11-16
+Project: NYC Taxi Data Pipeline (Python Only - OOP)
+Architecture: Object-oriented file processing with PySpark
