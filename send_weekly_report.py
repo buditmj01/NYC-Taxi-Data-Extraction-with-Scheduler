@@ -594,9 +594,19 @@ def send_to_gmail(
                     part = MIMEBase("application", "octet-stream")
                     part.set_payload(f.read())
                     encoders.encode_base64(part)
+
+                    # Use proper filename: if it's a part file from Spark output,
+                    # use the parent directory name + .csv extension
+                    if csv_path.name.startswith("part-"):
+                        # This is a Spark output part file, use parent folder name
+                        attachment_name = f"{csv_path.parent.name}.csv"
+                    else:
+                        # Use the actual filename
+                        attachment_name = csv_path.name
+
                     part.add_header(
                         "Content-Disposition",
-                        f"attachment; filename= {csv_path.name}",
+                        f"attachment; filename={attachment_name}",
                     )
                     msg.attach(part)
 
@@ -703,7 +713,12 @@ def main() -> None:
             print("CSV ATTACHMENTS:")
             print("=" * 70)
             for csv_file in csv_files:
-                print(f"  • {csv_file.name}")
+                # Show proper filename (same logic as attachment)
+                if csv_file.name.startswith("part-"):
+                    display_name = f"{csv_file.parent.name}.csv"
+                else:
+                    display_name = csv_file.name
+                print(f"  • {display_name}")
 
         print("\n" + "=" * 70)
         print("END OF DRY RUN")
@@ -746,7 +761,12 @@ def main() -> None:
                     print(f"  - {email}")
                 print(f"\nFile CSV yang dilampirkan:")
                 for csv_file in csv_files:
-                    print(f"  • {csv_file.name}")
+                    # Show proper filename (same logic as attachment)
+                    if csv_file.name.startswith("part-"):
+                        display_name = f"{csv_file.parent.name}.csv"
+                    else:
+                        display_name = csv_file.name
+                    print(f"  • {display_name}")
                 success_count += 1
             except Exception as e:
                 error_msg = f"✗ Gagal mengirim email: {e}"
