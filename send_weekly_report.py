@@ -54,7 +54,7 @@ GMAIL_SENDER_EMAIL = os.getenv("GMAIL_SENDER_EMAIL", "buditriatmojo01@gmail.com"
 GMAIL_SENDER_PASSWORD = os.getenv("GMAIL_SENDER_PASSWORD", "efaoyerhbaztlzep")
 GMAIL_RECIPIENT_EMAILS = os.getenv(
     "GMAIL_RECIPIENT_EMAILS",
-    "buditriatmojo01@gmail.com,adeliesly1501@gmail.com"
+    "buditriatmojo01@gmail.com,adeliesly1501@gmail.com,samsudiney@gmail.com"
 ).split(",")
 
 
@@ -310,7 +310,9 @@ def build_weekly_report_message(
 
 def send_to_discord(webhook_url: str, message: str) -> None:
     """Kirim pesan ke Discord via webhook sederhana (plain content)."""
-    payload = {"content": message}
+    # Tambahkan mention untuk user samsudinde
+    mention_message = f"<@samsudinde>\n{message}"
+    payload = {"content": mention_message}
     try:
         resp = requests.post(webhook_url, json=payload, timeout=10)
     except requests.RequestException as e:
