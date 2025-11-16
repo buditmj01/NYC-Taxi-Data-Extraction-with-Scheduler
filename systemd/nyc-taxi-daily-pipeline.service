@@ -1,0 +1,32 @@
+[Unit]
+Description=NYC Taxi Daily Data Pipeline
+Documentation=https://github.com/purwadhika-project/jcdeah007-capstone1
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=%USER%
+Group=%GROUP%
+WorkingDirectory=%PROJECT_DIR%
+Environment="PATH=%PROJECT_DIR%/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+# Run the daily pipeline script
+ExecStart=/bin/bash %PROJECT_DIR%/scripts/daily_data_pipeline.sh
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nyc-taxi-daily-pipeline
+
+# Security settings
+PrivateTmp=true
+NoNewPrivileges=true
+
+# Restart policy
+Restart=on-failure
+RestartSec=5min
+
+[Install]
+WantedBy=multi-user.target

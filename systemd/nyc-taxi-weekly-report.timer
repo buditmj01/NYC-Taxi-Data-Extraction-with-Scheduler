@@ -1,0 +1,20 @@
+[Unit]
+Description=NYC Taxi Weekly Report Timer
+Documentation=https://github.com/purwadhika-project/jcdeah007-capstone1
+Requires=nyc-taxi-weekly-report.service
+
+[Timer]
+# Run every Sunday at 6:00 PM (18:00)
+OnCalendar=Sun *-*-* 18:00:00
+
+# If the system was powered off, run on next boot
+Persistent=true
+
+# Randomize start time by up to 3 minutes
+RandomizedDelaySec=3min
+
+# Ensure timer is accurate
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

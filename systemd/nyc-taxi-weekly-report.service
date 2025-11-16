@@ -1,0 +1,32 @@
+[Unit]
+Description=NYC Taxi Weekly Report to Discord and Email
+Documentation=https://github.com/purwadhika-project/jcdeah007-capstone1
+After=network-online.target nyc-taxi-daily-pipeline.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=%USER%
+Group=%GROUP%
+WorkingDirectory=%PROJECT_DIR%
+Environment="PATH=%PROJECT_DIR%/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+
+# Run the weekly report script
+ExecStart=/bin/bash %PROJECT_DIR%/scripts/weekly_report.sh
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nyc-taxi-weekly-report
+
+# Security settings
+PrivateTmp=true
+NoNewPrivileges=true
+
+# Restart policy
+Restart=on-failure
+RestartSec=10min
+
+[Install]
+WantedBy=multi-user.target
