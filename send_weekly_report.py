@@ -20,6 +20,8 @@ import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 from pathlib import Path
 from typing import List
 
@@ -186,11 +188,16 @@ def build_weekly_report_message(
     df_metrics: pd.DataFrame,
     df_anomaly: pd.DataFrame,
     week_name: str,
+    for_discord: bool = False,
 ) -> str:
-    """Compose the Indonesian weekly report message (formal, concise)."""
+    """Compose the formal weekly report message with structured data aggregation.
+
+    Args:
+        for_discord: If True, formats message for Discord with detailed aggregation data
+    """
 
     week_info = parse_week_name(week_name)
-    week_display = f"Week {week_info['week_num']}, {week_info['month']} {week_info['year']}"
+    week_display = f"Minggu ke-{week_info['week_num']}, {week_info['month']} {week_info['year']}"
 
     # Calculate weekly totals (aggregate all data)
     total_trips = int(df_trips["total_trips"].sum()) if ("total_trips" in df_trips.columns and not df_trips.empty) else 0
@@ -253,59 +260,193 @@ def build_weekly_report_message(
             worst_day = f"{revenue_by_date.index[-1]} ({_fmt_money(revenue_by_date.iloc[-1])})"
 
     # Build message
-    header = f"📊 NYC Taxi Data Pipeline - Weekly Report — {week_display}"
+    header = f"📊 LAPORAN MINGGUAN DATA TAKSI NYC — {week_display}"
     intro = (
-        "Laporan ringkas performa mingguan layanan. Berikut ringkasan metrik utama, "
-        "tren, dan temuan yang perlu menjadi perhatian tim operasi dan monitoring."
+        "Berikut adalah laporan komprehensif performa layanan taksi NYC untuk periode minggu ini. "
+        "Laporan ini mencakup agregasi data perjalanan, pendapatan, dan analisis anomali yang telah diproses "
+        "melalui pipeline data otomatis."
     )
 
-    lines: List[str] = [header, "", intro, "", "**Ringkasan Mingguan**"]
-    lines.append(f"• Total perjalanan (trips): **{_fmt_int(total_trips)}**")
-    lines.append(f"• Total omzet: **{_fmt_money(total_revenue)}**")
-    lines.append(f"• Rata‑rata perjalanan per hari: **{_fmt_int(daily_avg_trips)}**")
-    lines.append(f"• Rata‑rata omzet per hari: **{_fmt_money(daily_avg_revenue)}**")
+    lines: List[str] = [header, "=" * 70, intro, ""]
+
+    # Section 1: Summary Metrics
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("📈 RINGKASAN METRIK MINGGUAN")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append(f"• Total Perjalanan        : {_fmt_int(total_trips)} trips")
+    lines.append(f"• Total Pendapatan        : {_fmt_money(total_revenue)}")
+    lines.append(f"• Rata-rata Trip per Hari : {_fmt_int(daily_avg_trips)} trips/hari")
+    lines.append(f"• Rata-rata Revenue/Hari  : {_fmt_money(daily_avg_revenue)}/hari")
     if avg_rev_trip is not None:
-        lines.append(f"• Rata‑rata omzet per trip: **{_fmt_money(avg_rev_trip)}**")
+        lines.append(f"• Rata-rata Revenue/Trip  : {_fmt_money(avg_rev_trip)}/trip")
     if avg_passengers is not None:
-        lines.append(f"• Rata‑rata penumpang per trip: **{avg_passengers:.2f}**")
+        lines.append(f"• Rata-rata Penumpang     : {avg_passengers:.2f} orang/trip")
+    lines.append(f"• Periode Pelaporan       : {num_days} hari")
     lines.append("")
 
-    lines.append("**Jam Puncak Mingguan**")
-    lines.append(f"• Jam puncak (3 teratas): **{peak_hours or 'data tidak tersedia'}**")
+    # Section 2: Detailed Data Aggregation (for Discord only)
+    if for_discord:
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("📊 DATA AGREGASI HARIAN")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+        # Aggregate trips and revenue by date
+        if "date" in df_trips.columns and not df_trips.empty:
+            trips_by_date = df_trips.groupby("date")["total_trips"].sum()
+            revenue_col = "total_revenue_per_day" if "total_revenue_per_day" in df_revenue.columns else "total_revenue"
+            if "date" in df_revenue.columns and not df_revenue.empty:
+                revenue_by_date = df_revenue.groupby("date")[revenue_col].sum()
+
+                lines.append("```")
+                lines.append(f"{'Tanggal':<12} {'Trips':>10} {'Pendapatan':>15}")
+                lines.append("-" * 40)
+                for date in sorted(trips_by_date.index):
+                    trips = trips_by_date.get(date, 0)
+                    revenue = revenue_by_date.get(date, 0)
+                    lines.append(f"{str(date):<12} {_fmt_int(trips):>10} {_fmt_money(revenue):>15}")
+                lines.append("```")
+                lines.append("")
+
+    # Section 3: Peak Hours Analysis
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("⏰ ANALISIS JAM PUNCAK")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append(f"• Jam Tersibuk (Top 3)    : {peak_hours or 'Data tidak tersedia'}")
     lines.append("")
 
-    lines.append("**Performa Harian**")
+    # Section 4: Performance Highlights
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("🏆 HIGHLIGHT PERFORMA")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     if best_day:
-        lines.append(f"• Hari terbaik: **{best_day}**")
+        lines.append(f"• Hari dengan Revenue Tertinggi  : {best_day}")
     if worst_day:
-        lines.append(f"• Hari terburuk: **{worst_day}**")
-    lines.append(f"• Jumlah hari dengan data: **{num_days} hari**")
+        lines.append(f"• Hari dengan Revenue Terendah   : {worst_day}")
     lines.append("")
 
-    lines.append("**Temuan Anomali Mingguan**")
+    # Section 5: Anomaly Detection
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("🔍 DETEKSI ANOMALI")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     if total_anomaly_count > 0:
-        lines.append(f"• Total anomali terdeteksi: **{total_anomaly_count}**")
-        lines.append(f"• Hari dengan anomali:")
+        lines.append(f"• Total Anomali Terdeteksi : {total_anomaly_count} kejadian")
+        lines.append("")
+        lines.append("Detail Anomali per Hari:")
         for reason in anomalies:
-            lines.append(f"  - {reason}")
+            lines.append(f"  • {reason}")
     else:
-        lines.append("• Tidak ada anomali signifikan terdeteksi minggu ini.")
+        lines.append("• Status: Tidak ada anomali signifikan terdeteksi pada periode ini.")
+        lines.append("• Indikasi: Operasional berjalan normal dan stabil.")
 
     lines.append("")
-    lines.append("**Rekomendasi & Tindakan**")
+
+    # Section 6: Recommendations
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("💡 REKOMENDASI TINDAK LANJUT")
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     if total_anomaly_count > 0:
-        lines.append("• Review anomali yang terdeteksi untuk identifikasi pola atau masalah sistemik.")
-        lines.append("• Evaluasi faktor penyebab pada hari-hari dengan anomali tinggi.")
-        lines.append("• Koordinasikan dengan tim operasional untuk mitigasi di minggu mendatang.")
+        lines.append("1. Lakukan review mendalam terhadap anomali yang teridentifikasi untuk")
+        lines.append("   mendeteksi pola atau potensi masalah sistemik.")
+        lines.append("2. Evaluasi faktor penyebab pada periode dengan anomali tinggi.")
+        lines.append("3. Koordinasikan dengan tim operasional untuk implementasi mitigasi")
+        lines.append("   pada minggu mendatang.")
     else:
-        lines.append("• Performa stabil sepanjang minggu. Pertahankan standar operasi saat ini.")
-        lines.append("• Lanjutkan pemantauan harian, terutama pada jam puncak yang telah diidentifikasi.")
+        lines.append("1. Performa operasional menunjukkan stabilitas yang baik.")
+        lines.append("2. Pertahankan standar operasi dan protokol yang telah berjalan.")
+        lines.append("3. Lanjutkan pemantauan rutin, khususnya pada jam-jam puncak")
+        lines.append("   yang telah teridentifikasi.")
 
     lines.append("")
-    lines.append(f"_Periode: {week_display}_")
-    lines.append("_Dilaporkan oleh: Tim Operasional Data — Sistem Monitoring Otomatis_")
+    lines.append("=" * 70)
+    lines.append(f"Periode Laporan  : {week_display}")
+    lines.append(f"Tanggal Generate : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append("Sistem Pelaporan : NYC Taxi Data Pipeline - Automated Monitoring")
+    lines.append("=" * 70)
 
     return "\n".join(lines)
+
+
+def build_email_message_with_csv_explanation(week_name: str) -> str:
+    """Build formal email message explaining the aggregated data and CSV files."""
+    week_info = parse_week_name(week_name)
+    week_display = f"Minggu ke-{week_info['week_num']}, {week_info['month']} {week_info['year']}"
+
+    message = f"""Kepada Yth. Tim Monitoring dan Analisis Data,
+
+Dengan hormat,
+
+Bersama email ini, kami sampaikan Laporan Agregasi Data Mingguan NYC Taxi Data Pipeline untuk periode {week_display}.
+
+TUJUAN LAPORAN
+==============
+Laporan ini bertujuan untuk memberikan gambaran komprehensif mengenai performa operasional layanan taksi NYC berdasarkan data yang telah dikumpulkan dan diproses melalui sistem data pipeline otomatis. Analisis ini mencakup metrik kunci, tren performa, dan identifikasi anomali yang memerlukan perhatian.
+
+PENJELASAN DATA AGREGASI
+=========================
+
+Terlampir pada email ini adalah file-file CSV yang berisi data agregasi mingguan sebagai berikut:
+
+1. TRIPS_PER_DAY.CSV
+   - Deskripsi: Agregasi jumlah perjalanan (trips) per hari
+   - Kolom utama: date, taxi_type, total_trips
+   - Kegunaan: Menganalisis volume perjalanan harian dan tren mobilitas
+   - Insight: Membantu mengidentifikasi pola permintaan layanan taksi
+
+2. REVENUE_PER_DAY.CSV
+   - Deskripsi: Agregasi total pendapatan (revenue) per hari
+   - Kolom utama: date, taxi_type, total_revenue_per_day
+   - Kegunaan: Evaluasi performa finansial harian
+   - Insight: Mengidentifikasi hari dengan pendapatan tertinggi/terendah
+
+3. PEAK_HOUR_PER_DAY.CSV
+   - Deskripsi: Analisis jam puncak berdasarkan volume perjalanan
+   - Kolom utama: date, pickup_hour, trips_per_hour
+   - Kegunaan: Identifikasi periode waktu dengan permintaan tertinggi
+   - Insight: Optimasi alokasi armada dan strategi operasional
+
+4. DAILY_AVG_METRICS.CSV
+   - Deskripsi: Rata-rata metrik operasional harian
+   - Kolom utama: date, avg_total_amount, avg_trip_distance,
+                 avg_trip_duration, avg_passenger_count
+   - Kegunaan: Evaluasi efisiensi operasional dan pengalaman pelanggan
+   - Insight: Benchmark performa dan identifikasi area perbaikan
+
+5. ANOMALY_MONITORING.CSV
+   - Deskripsi: Deteksi dan monitoring anomali operasional
+   - Kolom utama: date, is_anomaly, daily_trips, total_revenue_per_day,
+                 avg_passenger_count
+   - Kegunaan: Early warning system untuk deviasi operasional
+   - Insight: Identifikasi masalah potensial yang memerlukan investigasi
+
+METODOLOGI AGREGASI
+====================
+Data agregasi dihasilkan melalui proses sebagai berikut:
+• Ekstraksi data mentah dari sumber NYC TLC (Taxi & Limousine Commission)
+• Pembersihan dan validasi data menggunakan Apache PySpark
+• Agregasi statistik berdasarkan dimensi waktu (hari, jam)
+• Analisis anomali menggunakan metode statistik (±2σ deviation)
+• Export hasil ke format CSV untuk kemudahan analisis lanjutan
+
+REKOMENDASI PENGGUNAAN
+======================
+1. Gunakan file CSV terlampir untuk analisis mendalam dan visualisasi data
+2. Fokuskan perhatian pada anomali yang teridentifikasi
+3. Bandingkan metrik mingguan dengan periode sebelumnya untuk trend analysis
+4. Koordinasikan temuan dengan tim operasional untuk action planning
+
+Apabila terdapat pertanyaan atau memerlukan klarifikasi lebih lanjut mengenai data yang dilampirkan, silakan menghubungi tim data engineering.
+
+Terima kasih atas perhatian dan kerjasamanya.
+
+Hormat kami,
+
+NYC Taxi Data Pipeline - Automated Monitoring System
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+---
+Catatan: Email ini digenerate secara otomatis oleh sistem. File CSV terlampir berisi data agregasi untuk periode {week_display}.
+"""
+    return message
 
 
 def send_to_discord(webhook_url: str, message: str) -> None:
@@ -327,13 +468,18 @@ def send_to_gmail(
     recipient_emails: List[str],
     subject: str,
     message: str,
+    csv_attachments: List[Path] = None,
     smtp_server: str = GMAIL_SMTP_SERVER,
     smtp_port: int = GMAIL_SMTP_PORT,
 ) -> None:
-    """Kirim email via Gmail SMTP dengan format HTML dan plain text."""
+    """Kirim email via Gmail SMTP dengan format HTML, plain text, dan CSV attachments.
+
+    Args:
+        csv_attachments: List of Path objects to CSV files to attach
+    """
 
     # Buat email message
-    msg = MIMEMultipart("alternative")
+    msg = MIMEMultipart("mixed")
     msg["From"] = sender_email
     msg["To"] = ", ".join(recipient_emails)
     msg["Subject"] = subject
@@ -391,10 +537,26 @@ def send_to_gmail(
     """
 
     # Attach plain text dan HTML versions
+    msg_body = MIMEMultipart("alternative")
     part1 = MIMEText(message, "plain")
     part2 = MIMEText(html_body, "html")
-    msg.attach(part1)
-    msg.attach(part2)
+    msg_body.attach(part1)
+    msg_body.attach(part2)
+    msg.attach(msg_body)
+
+    # Attach CSV files if provided
+    if csv_attachments:
+        for csv_path in csv_attachments:
+            if csv_path.exists() and csv_path.is_file():
+                with open(csv_path, "rb") as f:
+                    part = MIMEBase("application", "octet-stream")
+                    part.set_payload(f.read())
+                    encoders.encode_base64(part)
+                    part.add_header(
+                        "Content-Disposition",
+                        f"attachment; filename= {csv_path.name}",
+                    )
+                    msg.attach(part)
 
     # Kirim email via SMTP
     try:
@@ -455,24 +617,55 @@ def main() -> None:
         print(f"Error saat memuat file input: {e}")
         return
 
+    # Build messages
     try:
-        message = build_weekly_report_message(
+        # Discord message with detailed aggregation data
+        discord_message = build_weekly_report_message(
             df_trips=df_trips,
             df_revenue=df_revenue,
             df_peak=df_peak,
             df_metrics=df_metrics,
             df_anomaly=df_anomaly,
             week_name=week_name,
+            for_discord=True,  # Include detailed aggregation tables
         )
+
+        # Email message with CSV explanation
+        email_message = build_email_message_with_csv_explanation(week_name)
+
+        # Collect CSV file paths for email attachments
+        csv_files = [p_trips, p_revenue, p_peak, p_metrics, p_anom]
+
     except Exception as e:
         print(f"Gagal membangun pesan laporan: {e}")
         return
 
     if args.dry_run:
-        print("--- DRY RUN: pesan yang akan dikirim ---\n")
-        print(f"Target: {'Discord' if send_discord else ''}{' & ' if (send_discord and send_gmail) else ''}{'Gmail' if send_gmail else ''}\n")
-        print(message)
-        print("\n--- END OF MESSAGE (dry-run) ---")
+        print("=" * 70)
+        print("DRY RUN MODE - Preview Pesan yang Akan Dikirim")
+        print("=" * 70)
+        print(f"\nTarget: {'Discord' if send_discord else ''}{' & ' if (send_discord and send_gmail) else ''}{'Gmail' if send_gmail else ''}\n")
+
+        if send_discord:
+            print("\n" + "=" * 70)
+            print("DISCORD MESSAGE PREVIEW")
+            print("=" * 70)
+            print(discord_message)
+
+        if send_gmail:
+            print("\n" + "=" * 70)
+            print("EMAIL MESSAGE PREVIEW")
+            print("=" * 70)
+            print(email_message)
+            print("\n" + "=" * 70)
+            print("CSV ATTACHMENTS:")
+            print("=" * 70)
+            for csv_file in csv_files:
+                print(f"  • {csv_file.name}")
+
+        print("\n" + "=" * 70)
+        print("END OF DRY RUN")
+        print("=" * 70)
     else:
         success_count = 0
         errors = []
@@ -480,8 +673,8 @@ def main() -> None:
         # Send to Discord
         if send_discord:
             try:
-                send_to_discord(DISCORD_WEBHOOK_URL, message)
-                print("✓ Pesan berhasil dikirim ke Discord.")
+                send_to_discord(DISCORD_WEBHOOK_URL, discord_message)
+                print("✓ Pesan berhasil dikirim ke Discord dengan data agregasi lengkap.")
                 success_count += 1
             except Exception as e:
                 error_msg = f"✗ Gagal mengirim ke Discord: {e}"
@@ -492,17 +685,21 @@ def main() -> None:
         if send_gmail:
             try:
                 week_info = parse_week_name(week_name)
-                email_subject = f"NYC Taxi Data Pipeline - Weekly Report ({week_info['month']} {week_info['year']}, Week {week_info['week_num']})"
+                email_subject = f"[NYC Taxi Pipeline] Laporan Agregasi Data Mingguan - {week_info['month']} {week_info['year']}, Minggu ke-{week_info['week_num']}"
                 send_to_gmail(
                     sender_email=GMAIL_SENDER_EMAIL,
                     sender_password=GMAIL_SENDER_PASSWORD,
                     recipient_emails=GMAIL_RECIPIENT_EMAILS,
                     subject=email_subject,
-                    message=message,
+                    message=email_message,
+                    csv_attachments=csv_files,
                 )
-                print(f"✓ Email berhasil dikirim ke {len(GMAIL_RECIPIENT_EMAILS)} penerima:")
+                print(f"✓ Email dengan {len(csv_files)} file CSV berhasil dikirim ke {len(GMAIL_RECIPIENT_EMAILS)} penerima:")
                 for email in GMAIL_RECIPIENT_EMAILS:
                     print(f"  - {email}")
+                print(f"\nFile CSV yang dilampirkan:")
+                for csv_file in csv_files:
+                    print(f"  • {csv_file.name}")
                 success_count += 1
             except Exception as e:
                 error_msg = f"✗ Gagal mengirim email: {e}"
