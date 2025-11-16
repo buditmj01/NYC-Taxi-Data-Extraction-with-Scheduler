@@ -1,87 +1,87 @@
 # NYC Taxi Data Pipeline
 
-A comprehensive data pipeline for processing, analyzing, and reporting on NYC Taxi trip data (Green and Yellow cabs).
+Pipeline data komprehensif untuk memproses, menganalisis, dan melaporkan data perjalanan Taksi NYC (Green dan Yellow cabs).
 
-## Overview
+## Gambaran Umum
 
-This pipeline provides a complete solution for:
-- **Data Extraction**: Process daily/weekly taxi trip data
-- **Data Storage**: PostgreSQL database or Parquet files
-- **Data Analysis**: Automated aggregations and metrics
-- **Anomaly Detection**: Statistical outlier identification
-- **Reporting**: Multi-channel notifications (Discord, Gmail)
+Pipeline ini menyediakan solusi lengkap untuk:
+- **Ekstraksi Data**: Memproses data perjalanan taksi harian/mingguan
+- **Penyimpanan Data**: Database PostgreSQL atau file Parquet
+- **Analisis Data**: Agregasi dan metrik otomatis
+- **Deteksi Anomali**: Identifikasi outlier statistik
+- **Pelaporan**: Notifikasi multi-channel (Discord, Gmail)
 
-## Quick Start
+## Memulai
 
-### Prerequisites
+### Prasyarat
 
-1. **PostgreSQL** (optional, for database mode):
+1. **PostgreSQL** (opsional, untuk mode database):
    ```bash
    ./setup_postgres.sh
    ```
 
-2. **Python Dependencies**:
+2. **Dependensi Python**:
    ```bash
    pip install pyspark pandas requests
    ```
 
-3. **Environment Setup**:
+3. **Pengaturan Environment**:
    ```bash
    cp .env.example .env
-   # Edit .env with your credentials
+   # Edit .env dengan kredensial Anda
    ```
 
-### Basic Usage
+### Penggunaan Dasar
 
 ```bash
-# Process 7 days in one command
+# Memproses 7 hari dalam satu perintah
 python data_extraction.py --mode daily-range --date 2025-09-01 --days 7
 
-# Upload to PostgreSQL
+# Upload ke PostgreSQL
 python data_extraction.py --mode weekly
 
-# Generate aggregated reports
+# Generate laporan agregasi
 python data_pipeline.py --table week_1_september_2025
 
-# Send weekly report
+# Kirim laporan mingguan
 python send_weekly_report.py --week "week_1_september_2025"
 ```
 
-## Features
+## Fitur
 
-### 🚀 Processing Modes
+### 🚀 Mode Pemrosesan
 
-| Mode | Description | Command |
-|------|-------------|---------|
-| **Daily** | Process one day | `--mode daily --date 2025-09-01` |
-| **Daily-Range** | Process 7+ days efficiently | `--mode daily-range --date 2025-09-01 --days 7` |
-| **Weekly** | Combine and store | `--mode weekly [--output postgres\|parquet]` |
+| Mode | Deskripsi | Perintah |
+|------|-----------|----------|
+| **Daily** | Memproses satu hari | `--mode daily --date 2025-09-01` |
+| **Daily-Range** | Memproses 7+ hari secara efisien | `--mode daily-range --date 2025-09-01 --days 7` |
+| **Weekly** | Menggabungkan dan menyimpan | `--mode weekly [--output postgres\|parquet]` |
 
-### 📊 Automated Aggregations
+### 📊 Agregasi Otomatis
 
-- **Trips per day** - Track volume trends
-- **Revenue per day** - Monitor earnings
-- **Peak hours** - Identify busy periods (24 hours)
-- **Daily averages** - Distance, fare, duration, passenger count
-- **Anomaly detection** - Statistical outlier identification
+- **Trips per day** - Melacak tren volume
+- **Revenue per day** - Memantau pendapatan
+- **Peak hours** - Mengidentifikasi periode sibuk (24 jam)
+- **Daily averages** - Jarak, tarif, durasi, jumlah penumpang
+- **Anomaly detection** - Identifikasi outlier statistik
 
-### 🔍 Anomaly Detection
+### 🔍 Deteksi Anomali
 
-Automatically flags unusual patterns:
-- Trip count deviations (±2σ from average)
-- Revenue drops (>20% decrease)
-- High passenger counts (>2 per trip)
+Menandai pola yang tidak biasa secara otomatis:
+- Deviasi jumlah trip (±2σ dari rata-rata)
+- Penurunan pendapatan (>20% penurunan)
+- Jumlah penumpang tinggi (>2 per trip)
 
-### 📁 File Organization
+### 📁 Organisasi File
 
-**Automatic filename generation**:
+**Penamaan file otomatis**:
 ```
 2025_09_week1_trips_per_day.csv
 2025_09_week1_revenue_per_day.csv
 2025_09_week1_anomaly_monitoring.csv
 ```
 
-**Week-specific folders**:
+**Folder spesifik per minggu**:
 ```
 output/
 ├── week_1_september_2025/
@@ -91,27 +91,27 @@ output/
     └── ...
 ```
 
-### 📧 Multi-Channel Reporting
+### 📧 Pelaporan Multi-Channel
 
-Send reports via:
+Kirim laporan melalui:
 - **Discord** webhooks
 - **Gmail** SMTP
-- **Both** simultaneously
+- **Keduanya** secara bersamaan
 
 ```bash
 python send_weekly_report.py --week "week_1_september_2025" --dry-run
 python send_weekly_report.py --week "week_1_september_2025" --discord-only
 python send_weekly_report.py --week "week_1_september_2025" --gmail-only
-python send_weekly_report.py --week "week_1_september_2025"  # Both
+python send_weekly_report.py --week "week_1_september_2025"  # Keduanya
 ```
 
-## Documentation
+## Dokumentasi
 
-- **[Complete Workflow Guide](documentation/POSTGRESQL_WORKFLOW.md)** - Step-by-step instructions
-- **[Features Summary](documentation/FEATURES_SUMMARY.md)** - Detailed feature documentation
-- **[Environment Setup](.env.example)** - Configuration template
+- **[Panduan Workflow Lengkap](documentation/POSTGRESQL_WORKFLOW.md)** - Instruksi langkah demi langkah
+- **[Ringkasan Fitur](documentation/FEATURES_SUMMARY.md)** - Dokumentasi fitur detail
+- **[Pengaturan Environment](.env.example)** - Template konfigurasi
 
-## Project Structure
+## Struktur Proyek
 
 ```
 Capstone 1/
@@ -130,58 +130,52 @@ Capstone 1/
 └── setup_postgres.sh             # Database setup
 ```
 
-## Key Improvements
+## Fitur Utama
 
-### ✨ New in Version 1.3
-- **Single file parquet** format (not folders)
-- **Parquet output** for weekly mode
-- **Enhanced documentation**
+### ✨ Versi 1.00
+- **Ekstraksi data otomatis** - Download dan proses data dari NYC TLC
+- **Mode pemrosesan fleksibel** - Daily, Daily-Range, dan Weekly
+- **Penyimpanan data ganda** - PostgreSQL dan Parquet
+- **Agregasi otomatis** - Trips, revenue, peak hours, daily averages
+- **Deteksi anomali** - Identifikasi pola tidak biasa secara otomatis
+- **Pelaporan multi-channel** - Discord dan Gmail
+- **Organisasi file terstruktur** - Folder per minggu dengan penamaan konsisten
 
-### ✨ Version 1.2
-- **Daily-range mode** - Process 7 days in one command
-- **Automatic filename generation** - `{YYYY}_{MM}_week{N}_{metric}.csv`
-- **Week-specific folders** - Organized output structure
+## Alur Kerja
 
-### ✨ Version 1.1
-- **Date standardization** - ISO 8601 format (YYYY-MM-DD)
-- **Passenger count anomaly** - Detect unusual passenger patterns
-- **Multi-channel reporting** - Discord and Gmail
-
-## Workflows
-
-### Workflow 1: Daily-Range + PostgreSQL (Recommended)
+### Workflow 1: Daily-Range + PostgreSQL (Direkomendasikan)
 
 ```bash
-# Step 1: Process 7 days
+# Langkah 1: Proses 7 hari
 python data_extraction.py --mode daily-range --date 2025-09-01 --days 7
 
-# Step 2: Upload to PostgreSQL
+# Langkah 2: Upload ke PostgreSQL
 python data_extraction.py --mode weekly
 
-# Step 3: Generate reports
+# Langkah 3: Generate laporan
 python data_pipeline.py --table week_1_september_2025
 
-# Step 4: Send notifications
+# Langkah 4: Kirim notifikasi
 python send_weekly_report.py --week "week_1_september_2025"
 ```
 
-### Workflow 2: Parquet-Only (No Database)
+### Workflow 2: Parquet-Only (Tanpa Database)
 
 ```bash
-# Step 1: Process 7 days
+# Langkah 1: Proses 7 hari
 python data_extraction.py --mode daily-range --date 2025-09-01 --days 7
 
-# Step 2: Create weekly parquet
+# Langkah 2: Buat weekly parquet
 python data_extraction.py --mode weekly --output parquet
 
-# Result: data/processed/weekly/week_1_september_2025.parquet
+# Hasil: data/processed/weekly/week_1_september_2025.parquet
 ```
 
-## Configuration
+## Konfigurasi
 
-### Environment Variables
+### Variabel Environment
 
-Create a `.env` file with your credentials:
+Buat file `.env` dengan kredensial Anda:
 
 ```bash
 # Discord
@@ -200,9 +194,9 @@ POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 ```
 
-## Output Examples
+## Contoh Output
 
-### CSV Aggregations
+### Agregasi CSV
 
 **Trips per day**:
 ```csv
@@ -221,73 +215,73 @@ date,taxi_type,daily_trips,total_revenue_per_day,avg_passenger_count,is_anomaly
 
 ## Troubleshooting
 
-### PostgreSQL Connection Issues
+### Masalah Koneksi PostgreSQL
 ```bash
-# Check if PostgreSQL is running
+# Cek apakah PostgreSQL berjalan
 docker ps
 
 # Restart PostgreSQL
 docker restart nyc-taxi-postgres
 ```
 
-### Missing CSV Files
+### File CSV Hilang
 ```bash
-# Ensure data_pipeline.py was run first
+# Pastikan data_pipeline.py sudah dijalankan terlebih dahulu
 python data_pipeline.py --table week_1_september_2025
 
-# Check output directory
+# Cek direktori output
 ls -la output/week_1_september_2025/
 ```
 
-### Report Send Failures
+### Gagal Mengirim Laporan
 ```bash
-# Test with dry-run first
+# Test dengan dry-run terlebih dahulu
 python send_weekly_report.py --week "week_1_september_2025" --dry-run
 
-# Verify environment variables
+# Verifikasi variabel environment
 cat .env
 ```
 
-## Use Cases
+## Kasus Penggunaan
 
-1. **Production Monitoring** - Daily processing with automated reporting
-2. **Data Archival** - Weekly parquet backups
-3. **Development/Testing** - Parquet-only mode without database
-4. **Data Sharing** - Single file parquet exports
-5. **Anomaly Alerts** - Automated outlier detection
+1. **Production Monitoring** - Pemrosesan harian dengan pelaporan otomatis
+2. **Arsip Data** - Backup parquet mingguan
+3. **Development/Testing** - Mode parquet-only tanpa database
+4. **Berbagi Data** - Ekspor file parquet tunggal
+5. **Alert Anomali** - Deteksi outlier otomatis
 
-## Performance
+## Performa
 
-- **Daily-range mode**: ~85% faster than individual daily processing
-- **Single file parquet**: Faster I/O and simpler management
-- **Efficient aggregations**: Spark DataFrame operations with parallel processing
+- **Mode daily-range**: ~85% lebih cepat dari pemrosesan harian individual
+- **Single file parquet**: I/O lebih cepat dan manajemen lebih sederhana
+- **Agregasi efisien**: Operasi Spark DataFrame dengan pemrosesan paralel
 
-## Requirements
+## Persyaratan
 
 - Python 3.7+
 - PySpark 3.0+
 - Pandas 1.0+
 - Requests 2.0+
-- PostgreSQL 12+ (optional)
-- Docker (for PostgreSQL setup)
+- PostgreSQL 12+ (opsional)
+- Docker (untuk setup PostgreSQL)
 
-## License
+## Lisensi
 
-This project is part of a capstone project for educational purposes.
+Proyek ini adalah bagian dari proyek capstone untuk tujuan edukasi.
 
-## Support
+## Dukungan
 
-For issues or questions:
-1. Check the [Complete Workflow Guide](documentation/POSTGRESQL_WORKFLOW.md)
-2. Review [Features Summary](documentation/FEATURES_SUMMARY.md)
-3. Verify environment setup in `.env`
+Untuk masalah atau pertanyaan:
+1. Cek [Panduan Workflow Lengkap](documentation/POSTGRESQL_WORKFLOW.md)
+2. Review [Ringkasan Fitur](documentation/FEATURES_SUMMARY.md)
+3. Verifikasi pengaturan environment di `.env`
 
-## Contributing
+## Kontribusi
 
-This is a capstone project. For suggestions or improvements, please document them in the issues section.
+Ini adalah proyek capstone. Untuk saran atau perbaikan, silakan dokumentasikan di bagian issues.
 
 ---
 
-**Version**: 1.3
-**Last Updated**: November 2025
-**Status**: Active Development
+**Versi**: 1.00
+**Terakhir Diperbarui**: November 2025
+**Status**: Pengembangan Aktif
