@@ -35,6 +35,27 @@ from pyspark.sql.window import Window
 
 
 # ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+
+def setup_logging():
+    """Configure logging to write to both file and console."""
+    root_dir = Path(__file__).resolve().parent
+    log_file = root_dir / "report.log"
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - [DATA_PIPELINE] - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[
+            logging.FileHandler(log_file, mode='a', encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
+    return logging.getLogger(__name__)
+
+
+# ============================================================================
 # DATE STANDARDIZATION
 # ============================================================================
 # Standard date format: YYYY-MM-DD (ISO 8601)
@@ -874,6 +895,9 @@ def download_postgres_jdbc() -> str:
 
 def main():
     """Main entry point for the pipeline."""
+    # Setup logging
+    logger = setup_logging()
+
     # Parse command-line arguments
     parser = argparse.ArgumentParser(
         description="NYC Taxi Data Pipeline - Process weekly data from PostgreSQL"
@@ -887,12 +911,10 @@ def main():
 
     args = parser.parse_args()
 
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    logger.info("=" * 70)
+    logger.info("NYC TAXI DATA PIPELINE - STARTED")
+    logger.info("=" * 70)
+    logger.info(f"Processing table: {args.table}")
 
     print("\n" + "█" * 70)
     print("  NYC TAXI DATA PIPELINE - PostgreSQL Weekly Processing")
@@ -900,15 +922,31 @@ def main():
     print(f"  Table: {args.table}")
     print("█" * 70 + "\n")
 
-    # Download JDBC driver
-    jdbc_path = download_postgres_jdbc()
+    try:
+        # Download JDBC driver
+        logger.info("Downloading PostgreSQL JDBC driver")
+        jdbc_path = download_postgres_jdbc()
+        logger.info(f"JDBC driver ready: {jdbc_path}")
 
-    # Create config with specified table
-    config = PipelineConfig(postgres_table=args.table)
+        # Create config with specified table
+        logger.info(f"Creating pipeline configuration for table: {args.table}")
+        config = PipelineConfig(postgres_table=args.table)
 
-    # Run pipeline
-    pipeline = NYCTaxiPipeline(config)
-    pipeline.run(jdbc_path)
+        # Run pipeline
+        logger.info("Initializing NYC Taxi Pipeline")
+        pipeline = NYCTaxiPipeline(config)
+
+        logger.info("Starting pipeline execution")
+        pipeline.run(jdbc_path)
+
+        logger.info("=" * 70)
+        logger.info("NYC TAXI DATA PIPELINE - COMPLETED SUCCESSFULLY")
+        logger.info("=" * 70)
+
+    except Exception as e:
+        logger.error(f"Pipeline failed with error: {str(e)}", exc_info=True)
+        print(f"\n✗ ERROR: {str(e)}\n")
+        raise
 
 
 if __name__ == "__main__":

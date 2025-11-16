@@ -22,6 +22,7 @@ Usage:
 
 import os
 import argparse
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from pyspark.sql import SparkSession
@@ -53,6 +54,24 @@ POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
 
 # JDBC URL
 JDBC_URL = f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+LOG_FILE = ROOT_DIR / "report.log"
+
+def setup_logging():
+    """Configure logging to write to both file and console."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - [DATA_EXTRACTION] - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[
+            logging.FileHandler(LOG_FILE, mode='a', encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
+    return logging.getLogger(__name__)
 
 
 def create_processed_dir():
@@ -568,6 +587,9 @@ def process_weekly(spark, output_format="postgres"):
 
 def main():
     """Main execution pipeline."""
+    # Setup logging
+    logger = setup_logging()
+
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="NYC Taxi Data Extraction Pipeline")
     parser.add_argument(
@@ -600,6 +622,17 @@ def main():
     if args.mode in ["daily", "daily-range"] and not args.date:
         parser.error("--date is required when mode is 'daily' or 'daily-range'")
 
+    logger.info("=" * 70)
+    logger.info("NYC TAXI DATA EXTRACTION PIPELINE - STARTED")
+    logger.info("=" * 70)
+    logger.info(f"Mode: {args.mode}")
+    if args.date:
+        logger.info(f"Date: {args.date}")
+    if args.mode == "daily-range":
+        logger.info(f"Days: {args.days}")
+    if args.mode == "weekly":
+        logger.info(f"Output: {args.output}")
+
     print("\n")
     print("█" * 70)
     print("  NYC TAXI DATA EXTRACTION PIPELINE")
@@ -624,17 +657,29 @@ def main():
 
         # Execute based on mode
         if args.mode == "daily":
+            logger.info(f"Processing daily mode for date: {args.date}")
             process_daily(spark, args.date)
+            logger.info(f"Daily processing completed successfully for {args.date}")
         elif args.mode == "daily-range":
+            logger.info(f"Processing daily-range mode: {args.days} days starting from {args.date}")
             process_daily_range(spark, args.date, args.days)
+            logger.info(f"Daily-range processing completed successfully for {args.days} days")
         elif args.mode == "weekly":
+            logger.info(f"Processing weekly mode with output: {args.output}")
             process_weekly(spark, args.output)
+            logger.info(f"Weekly processing completed successfully to {args.output}")
+
+        logger.info("=" * 70)
+        logger.info("NYC TAXI DATA EXTRACTION PIPELINE - COMPLETED SUCCESSFULLY")
+        logger.info("=" * 70)
 
     except Exception as e:
+        logger.error(f"Pipeline failed with error: {str(e)}", exc_info=True)
         print(f"\n✗ ERROR: {str(e)}\n")
         raise
 
     finally:
+        logger.info("Stopping Spark session")
         spark.stop()
 
 

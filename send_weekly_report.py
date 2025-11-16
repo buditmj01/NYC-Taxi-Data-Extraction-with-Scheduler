@@ -15,6 +15,7 @@ Dependencies: pandas, requests
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import smtplib
 from datetime import datetime
@@ -34,6 +35,8 @@ import requests
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).parent
 OUTPUT_BASE_DIR = BASE_DIR / "output"
+LOG_FILE = BASE_DIR / "report.log"
+
 FILES = {
     "trips_per_day": "trips_per_day.csv",
     "revenue_per_day": "revenue_per_day.csv",
@@ -41,6 +44,24 @@ FILES = {
     "daily_avg_metrics": "daily_avg_metrics.csv",
     "anomaly_monitoring": "anomaly_monitoring.csv",
 }
+
+
+# ---------------------------------------------------------------------------
+# Logging Configuration
+# ---------------------------------------------------------------------------
+
+def setup_logging():
+    """Configure logging to write to both file and console."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - [WEEKLY_REPORT] - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[
+            logging.FileHandler(LOG_FILE, mode='a', encoding='utf-8'),
+            logging.StreamHandler()
+        ]
+    )
+    return logging.getLogger(__name__)
 
 # Discord webhook (from environment or hardcoded)
 DISCORD_WEBHOOK_URL = os.getenv(
@@ -635,6 +656,9 @@ def send_to_gmail(
 
 
 def main() -> None:
+    # Setup logging
+    logger = setup_logging()
+
     parser = argparse.ArgumentParser(description="Kirim laporan mingguan ke Discord dan/atau Gmail")
     parser.add_argument(
         "--week",
@@ -652,25 +676,37 @@ def main() -> None:
     send_discord = not args.gmail_only
     send_gmail = not args.discord_only
 
+    logger.info("=" * 70)
+    logger.info("WEEKLY REPORT SENDER - STARTED")
+    logger.info("=" * 70)
+    logger.info(f"Week: {week_name}")
+    logger.info(f"Mode: {'DRY RUN' if args.dry_run else 'LIVE'}")
+    logger.info(f"Targets: Discord={send_discord}, Gmail={send_gmail}")
+
     # Muat dan validasi file dari output/{week_name}/
     try:
+        logger.info(f"Loading CSV files from output/{week_name}/")
         p_trips = _find_csv_in_week_folder(week_name, FILES["trips_per_day"])
         p_revenue = _find_csv_in_week_folder(week_name, FILES["revenue_per_day"])
         p_peak = _find_csv_in_week_folder(week_name, FILES["peak_hour_per_day"])
         p_metrics = _find_csv_in_week_folder(week_name, FILES["daily_avg_metrics"])
         p_anom = _find_csv_in_week_folder(week_name, FILES["anomaly_monitoring"])
 
+        logger.info("Validating CSV data")
         df_trips = load_csv_with_validation(p_trips, ["date", "total_trips"])
         df_revenue = load_csv_with_validation(p_revenue, ["date", "total_revenue_per_day"])
         df_peak = load_csv_with_validation(p_peak, ["date", "pickup_hour", "trips_per_hour"])
         df_metrics = load_csv_with_validation(p_metrics, ["date", "avg_total_amount"])
         df_anomaly = load_csv_with_validation(p_anom, ["date", "is_anomaly", "total_revenue_per_day"])
+        logger.info("All CSV files loaded and validated successfully")
     except Exception as e:
+        logger.error(f"Failed to load CSV files: {e}", exc_info=True)
         print(f"Error saat memuat file input: {e}")
         return
 
     # Build messages
     try:
+        logger.info("Building report messages")
         # Discord message with detailed aggregation data
         discord_message = build_weekly_report_message(
             df_trips=df_trips,
@@ -687,12 +723,15 @@ def main() -> None:
 
         # Collect CSV file paths for email attachments
         csv_files = [p_trips, p_revenue, p_peak, p_metrics, p_anom]
+        logger.info("Report messages built successfully")
 
     except Exception as e:
+        logger.error(f"Failed to build report messages: {e}", exc_info=True)
         print(f"Gagal membangun pesan laporan: {e}")
         return
 
     if args.dry_run:
+        logger.info("DRY RUN MODE - No messages will be sent")
         print("=" * 70)
         print("DRY RUN MODE - Preview Pesan yang Akan Dikirim")
         print("=" * 70)
@@ -730,22 +769,27 @@ def main() -> None:
         # Send to Discord
         if send_discord:
             try:
+                logger.info("Sending report to Discord")
                 send_to_discord(DISCORD_WEBHOOK_URL, discord_message)
                 msg_len = len(f"<@samsudinde>\n{discord_message}")
                 if msg_len > 2000:
                     num_parts = (msg_len // 1900) + 1
+                    logger.info(f"Discord message sent successfully ({num_parts} parts)")
                     print(f"✓ Pesan berhasil dikirim ke Discord ({num_parts} bagian) dengan data agregasi lengkap.")
                 else:
+                    logger.info("Discord message sent successfully")
                     print("✓ Pesan berhasil dikirim ke Discord dengan data agregasi lengkap.")
                 success_count += 1
             except Exception as e:
                 error_msg = f"✗ Gagal mengirim ke Discord: {e}"
+                logger.error(f"Failed to send to Discord: {e}", exc_info=True)
                 print(error_msg)
                 errors.append(error_msg)
 
         # Send to Gmail
         if send_gmail:
             try:
+                logger.info(f"Sending email with {len(csv_files)} CSV attachments to {len(GMAIL_RECIPIENT_EMAILS)} recipients")
                 week_info = parse_week_name(week_name)
                 email_subject = f"[NYC Taxi Pipeline] Laporan Agregasi Data Mingguan - {week_info['month']} {week_info['year']}, Minggu ke-{week_info['week_num']}"
                 send_to_gmail(
@@ -756,6 +800,7 @@ def main() -> None:
                     message=email_message,
                     csv_attachments=csv_files,
                 )
+                logger.info(f"Email sent successfully to {GMAIL_RECIPIENT_EMAILS}")
                 print(f"✓ Email dengan {len(csv_files)} file CSV berhasil dikirim ke {len(GMAIL_RECIPIENT_EMAILS)} penerima:")
                 for email in GMAIL_RECIPIENT_EMAILS:
                     print(f"  - {email}")
@@ -770,10 +815,18 @@ def main() -> None:
                 success_count += 1
             except Exception as e:
                 error_msg = f"✗ Gagal mengirim email: {e}"
+                logger.error(f"Failed to send email: {e}", exc_info=True)
                 print(error_msg)
                 errors.append(error_msg)
 
         # Summary
+        logger.info(f"Report sending completed: {success_count} successful, {len(errors)} failed")
+        if errors:
+            logger.error(f"Errors occurred: {errors}")
+        logger.info("=" * 70)
+        logger.info("WEEKLY REPORT SENDER - COMPLETED")
+        logger.info("=" * 70)
+
         print("\n" + "=" * 70)
         print(f"SUMMARY: {success_count} berhasil, {len(errors)} gagal")
         if errors:
