@@ -15,17 +15,23 @@ This pipeline provides a complete solution for:
 
 ### 📋 Prerequisites
 
-1. **🐘 PostgreSQL** (optional, for database mode):
+1. **🐍 Python 3.8+** (Python 3.12 recommended)
+
+2. **📦 Install Dependencies** (Automatic):
+   ```bash
+   python3 install_requirements.py
+   ```
+   Or manually:
+   ```bash
+   pip3 install -r requirements.txt
+   ```
+
+3. **🐘 PostgreSQL** (optional, for database mode):
    ```bash
    ./setup_postgres.sh
    ```
 
-2. **🐍 Python Dependencies**:
-   ```bash
-   pip install pyspark pandas requests
-   ```
-
-3. **⚙️ Environment Setup**:
+4. **⚙️ Environment Setup** (optional):
    ```bash
    cp .env.example .env
    # Edit .env with your credentials
@@ -105,10 +111,87 @@ python send_weekly_report.py --week "week_1_september_2025" --gmail-only
 python send_weekly_report.py --week "week_1_september_2025"  # Both
 ```
 
+### 📋 Comprehensive Logging
+
+All scripts now include detailed logging to track operations and troubleshoot issues:
+
+```bash
+logs/
+├── data_extraction_YYYY-MM-DD.log    # Extraction process logs
+├── data_pipeline_YYYY-MM-DD.log      # Aggregation process logs
+└── weekly_report_YYYY-MM-DD.log      # Reporting process logs
+```
+
+**Features:**
+- 📝 Timestamped log entries for all operations
+- 🔍 Detailed error messages with stack traces
+- 📊 Performance metrics (execution time, row counts)
+- 🎯 Easy debugging with rotating log files
+
+**View logs:**
+```bash
+# View latest extraction log
+tail -f logs/data_extraction_$(date +%Y-%m-%d).log
+
+# Search for errors
+grep "ERROR" logs/*.log
+
+# View all logs from today
+ls -lh logs/*$(date +%Y-%m-%d).log
+```
+
+### ⏰ Automation with systemd
+
+Automate daily pipeline runs and weekly reports using systemd timers (Linux/macOS):
+
+**Services included:**
+- 🔄 **Daily Pipeline** - Runs every day at 2:00 AM
+- 📧 **Weekly Report** - Sends reports every Monday at 9:00 AM
+
+**Setup automation:**
+```bash
+# See detailed instructions
+cat documentation/AUTOMATION_SETUP.md
+
+# Quick install (Linux)
+sudo cp systemd/*.service /etc/systemd/system/
+sudo cp systemd/*.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable nyc-taxi-daily-pipeline.timer
+sudo systemctl enable nyc-taxi-weekly-report.timer
+sudo systemctl start nyc-taxi-daily-pipeline.timer
+sudo systemctl start nyc-taxi-weekly-report.timer
+```
+
+**Check automation status:**
+```bash
+# View timer status
+systemctl list-timers nyc-taxi-*
+
+# View service logs
+journalctl -u nyc-taxi-daily-pipeline.service -f
+```
+
 ## 📚 Documentation
 
+### 🚀 Getting Started
+- **[⚡ Quick Start Guide](QUICK_START.md)** - Complete setup and installation
+- **[🏃 Run Pipeline](RUN_PIPELINE.md)** - Quick reference commands
 - **[📖 Complete Workflow Guide](documentation/POSTGRESQL_WORKFLOW.md)** - Step-by-step instructions
+- **[⚙️ Automation Setup](documentation/AUTOMATION_SETUP.md)** - systemd scheduling
+
+### 📊 Project Documentation
+- **[📝 Latar Belakang dan Tujuan](docs/01_Latar_Belakang_dan_Tujuan.md)** - Background and objectives
+- **[📈 Hasil dan Pembahasan](docs/02_Hasil_dan_Pembahasan.md)** - Results and analysis
+- **[🔄 Diagram dan Alur Project](docs/03_Diagram_dan_Alur_Project.md)** - Workflow diagrams
+- **[💻 Penjelasan Kode](docs/04_Penjelasan_Kode.md)** - Code explanation
+- **[📸 Output dan Screenshots](docs/05_Output_dan_Screenshots.md)** - Visual outputs
+- **[🎯 Kesimpulan dan Saran](docs/06_Kesimpulan_dan_Saran.md)** - Conclusions and recommendations
+- **[🔍 View Parquet Analysis](docs/07_View_Parquet_Analysis.md)** - Data exploration guide
+
+### 🔧 Technical Documentation
 - **[✨ Features Summary](documentation/FEATURES_SUMMARY.md)** - Detailed feature documentation
+- **[📋 Weekly Table Examples](documentation/WEEKLY_TABLE_EXAMPLES.md)** - Database schema examples
 - **[⚙️ Environment Setup](.env.example)** - Configuration template
 
 ## 📂 Project Structure
@@ -121,25 +204,38 @@ NYC Taxi Data Pipeline/
 │       ├── daily/                # 📅 Daily parquet files
 │       └── weekly/               # 📊 Weekly parquet files
 ├── output/                       # 📄 CSV aggregations (by week)
-├── jdbc/                         # 🔌 PostgreSQL JDBC driver
-├── documentation/                # 📚 Documentation files
+├── logs/                         # 📋 Application logs
+├── docs/                         # 📚 Project documentation (Indonesian)
+├── documentation/                # 📖 Technical documentation (English)
+├── systemd/                      # ⏰ Automation service files
+│   ├── nyc-taxi-daily-pipeline.service
+│   ├── nyc-taxi-daily-pipeline.timer
+│   ├── nyc-taxi-weekly-report.service
+│   └── nyc-taxi-weekly-report.timer
 ├── data_extraction.py            # 🔧 Main extraction pipeline
 ├── data_pipeline.py              # ⚙️ Aggregation engine
 ├── send_weekly_report.py         # 📧 Reporting system
 ├── view_parquet.py               # 👁️ Data viewer
-└── setup_postgres.sh             # 🐘 Database setup
+├── install_requirements.py       # 📦 Dependency installer
+├── requirements.txt              # 📋 Python dependencies
+├── setup_postgres.sh             # 🐘 Database setup
+├── QUICK_START.md                # ⚡ Quick start guide
+└── RUN_PIPELINE.md               # 🏃 Command reference
 ```
 
 ## 🎉 Key Features
 
-### ✨ Version 1.00
+### ✨ Version 1.10
 - **📥 Automated data extraction** - Download and process data from NYC TLC
 - **🔄 Flexible processing modes** - Daily, Daily-Range, and Weekly
 - **💾 Dual storage options** - PostgreSQL and Parquet
 - **📊 Automated aggregations** - Trips, revenue, peak hours, daily averages
 - **🔍 Anomaly detection** - Automatically identify unusual patterns
-- **📧 Multi-channel reporting** - Discord and Gmail
+- **📧 Multi-channel reporting** - Discord and Gmail with CSV attachments
 - **📁 Structured file organization** - Week-specific folders with consistent naming
+- **📋 Comprehensive logging** - Detailed logs for all operations in `logs/` directory
+- **⏰ Automation support** - systemd service files for scheduled execution
+- **📦 Easy installation** - Automated dependency installer
 
 ## 🔄 Workflows
 
@@ -258,12 +354,18 @@ cat .env
 
 ## 📋 Requirements
 
-- 🐍 Python 3.7+
-- ⚡ PySpark 3.0+
+- 🐍 Python 3.8+ (Python 3.12 recommended)
+- 🏹 PyArrow (for Parquet file handling)
 - 🐼 Pandas 1.0+
+- 🗄️ SQLAlchemy + psycopg2-binary (for PostgreSQL)
 - 🌐 Requests 2.0+
-- 🐘 PostgreSQL 12+ (optional)
-- 🐳 Docker (for PostgreSQL setup)
+- 📧 python-dotenv (for environment variables)
+- 🐘 PostgreSQL 12+ (optional, for database mode)
+
+**Note:** All Python dependencies can be installed automatically:
+```bash
+python3 install_requirements.py
+```
 
 ## 📜 License
 
@@ -272,16 +374,40 @@ This project is part of a capstone project for educational purposes. 🎓
 ## 💬 Support
 
 For issues or questions:
-1. 📖 Check the [Complete Workflow Guide](documentation/POSTGRESQL_WORKFLOW.md)
-2. ✨ Review [Features Summary](documentation/FEATURES_SUMMARY.md)
-3. ⚙️ Verify environment setup in `.env`
+1. ⚡ Start with [Quick Start Guide](QUICK_START.md)
+2. 🏃 Check [Run Pipeline](RUN_PIPELINE.md) for command reference
+3. 📖 Review [Complete Workflow Guide](documentation/POSTGRESQL_WORKFLOW.md)
+4. ⏰ See [Automation Setup](documentation/AUTOMATION_SETUP.md) for scheduling
+5. ✨ Browse [Features Summary](documentation/FEATURES_SUMMARY.md)
+6. 📋 Check logs in `logs/` directory for detailed error messages
 
 ## 🤝 Contributing
 
 This is a capstone project. For suggestions or improvements, please document them in the issues section.
 
+## 🆕 Recent Updates
+
+### Version 1.10 (November 2025)
+- ✅ Added comprehensive logging system to all scripts
+- ✅ Created systemd automation for daily pipeline and weekly reports
+- ✅ Enhanced email reporting with CSV attachments
+- ✅ Fixed Discord message length limit with auto-split
+- ✅ Added detailed aggregation reports
+- ✅ Organized documentation into `docs/` and `documentation/` folders
+- ✅ Added `install_requirements.py` for easy dependency setup
+- ✅ Added `requirements.txt` for package management
+- ✅ Created `QUICK_START.md` and `RUN_PIPELINE.md` guides
+
+### Version 1.00 (September 2025)
+- Initial release with core pipeline functionality
+- PostgreSQL and Parquet storage modes
+- Multi-channel reporting (Discord, Gmail)
+- Anomaly detection system
+
 ---
 
-**📌 Version**: 1.00
-**📅 Last Updated**: November 2025
-**🚦 Status**: Active Development
+**📌 Version**: 1.10
+**📅 Last Updated**: November 17, 2025
+**🚦 Status**: Production Ready
+**👨‍💻 Author**: Budi Triatmojo
+**📧 Contact**: buditriatmojo01@gmail.com
