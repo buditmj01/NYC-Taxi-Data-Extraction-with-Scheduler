@@ -211,261 +211,152 @@ def build_weekly_report_message(
     week_name: str,
     for_discord: bool = False,
 ) -> str:
-    """Compose the formal weekly report message with structured data aggregation.
+    """Compose a clean, professional weekly report with key insights.
 
     Args:
-        for_discord: If True, formats message for Discord with detailed aggregation data
+        for_discord: If True, includes daily breakdown table
     """
 
     week_info = parse_week_name(week_name)
-    week_display = f"Minggu ke-{week_info['week_num']}, {week_info['month']} {week_info['year']}"
+    week_display = f"Week {week_info['week_num']}, {week_info['month']} {week_info['year']}"
 
-    # Calculate weekly totals (aggregate all data)
+    # Calculate weekly totals
     total_trips = int(df_trips["total_trips"].sum()) if ("total_trips" in df_trips.columns and not df_trips.empty) else 0
-
-    # Use total_revenue_per_day if available, else total_revenue
     revenue_col = "total_revenue_per_day" if "total_revenue_per_day" in df_revenue.columns else "total_revenue"
     total_revenue = float(df_revenue[revenue_col].sum()) if (revenue_col in df_revenue.columns and not df_revenue.empty) else 0.0
 
-    # Calculate daily average
+    # Calculate averages
     num_days = len(df_trips["date"].unique()) if "date" in df_trips.columns and not df_trips.empty else 1
     daily_avg_trips = total_trips / num_days if num_days > 0 else 0
     daily_avg_revenue = total_revenue / num_days if num_days > 0 else 0.0
 
-    # Peak hours: group by pickup_hour across the entire week
+    # Peak hours analysis
     peak_hours = None
     if "pickup_hour" in df_peak.columns and not df_peak.empty:
-        # Aggregate trips by hour and find top 3
         peak_by_hour = df_peak.groupby("pickup_hour")["trips_per_hour"].sum().sort_values(ascending=False).head(3)
         if not peak_by_hour.empty:
             peak_hours = ", ".join([f"{int(h)}:00" for h in peak_by_hour.index])
 
-    # Weekly average metrics
+    # Trip metrics
     avg_rev_trip = None
-    avg_passengers = None
     if "avg_total_amount" in df_metrics.columns and not df_metrics.empty:
         try:
-            # Calculate average across all days
             avg_rev_trip = float(df_metrics["avg_total_amount"].mean())
         except Exception:
-            avg_rev_trip = None
-    if "avg_passenger_count" in df_metrics.columns and not df_metrics.empty:
-        try:
-            avg_passengers = float(df_metrics["avg_passenger_count"].mean())
-        except Exception:
-            avg_passengers = None
+            pass
 
-    # Anomalies - aggregate across the week
-    anomalies = []
+    # Anomaly detection
     total_anomaly_count = 0
     if not df_anomaly.empty and "is_anomaly" in df_anomaly.columns:
-        anomaly_rows = df_anomaly[df_anomaly["is_anomaly"] == True]
-        total_anomaly_count = len(anomaly_rows)
+        total_anomaly_count = len(df_anomaly[df_anomaly["is_anomaly"] == True])
 
-        # Group by date to show which days had anomalies
-        if "date" in anomaly_rows.columns:
-            anomaly_by_date = anomaly_rows.groupby("date").size()
-            for date, count in anomaly_by_date.head(5).items():
-                anomalies.append(f"{date}: {count} anomali terdeteksi")
-            if len(anomaly_by_date) > 5:
-                anomalies.append(f"...dan {len(anomaly_by_date) - 5} hari lainnya")
-
-    # Best and worst performing days
+    # Best/worst days
     best_day = None
     worst_day = None
     if "date" in df_revenue.columns and revenue_col in df_revenue.columns and not df_revenue.empty:
-        # Group by date and sum revenue
         revenue_by_date = df_revenue.groupby("date")[revenue_col].sum().sort_values(ascending=False)
         if len(revenue_by_date) > 0:
             best_day = f"{revenue_by_date.index[0]} ({_fmt_money(revenue_by_date.iloc[0])})"
             worst_day = f"{revenue_by_date.index[-1]} ({_fmt_money(revenue_by_date.iloc[-1])})"
 
     # Build message
-    header = f"📊 LAPORAN MINGGUAN DATA TAKSI NYC — {week_display}"
-    intro = (
-        "Berikut adalah laporan komprehensif performa layanan taksi NYC untuk periode minggu ini. "
-        "Laporan ini mencakup agregasi data perjalanan, pendapatan, dan analisis anomali yang telah diproses "
-        "melalui pipeline data otomatis."
-    )
-
-    lines: List[str] = [header, "=" * 70, intro, ""]
-
-    # Section 1: Summary Metrics
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("📈 RINGKASAN METRIK MINGGUAN")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append(f"• Total Perjalanan        : {_fmt_int(total_trips)} trips")
-    lines.append(f"• Total Pendapatan        : {_fmt_money(total_revenue)}")
-    lines.append(f"• Rata-rata Trip per Hari : {_fmt_int(daily_avg_trips)} trips/hari")
-    lines.append(f"• Rata-rata Revenue/Hari  : {_fmt_money(daily_avg_revenue)}/hari")
-    if avg_rev_trip is not None:
-        lines.append(f"• Rata-rata Revenue/Trip  : {_fmt_money(avg_rev_trip)}/trip")
-    if avg_passengers is not None:
-        lines.append(f"• Rata-rata Penumpang     : {avg_passengers:.2f} orang/trip")
-    lines.append(f"• Periode Pelaporan       : {num_days} hari")
+    lines: List[str] = []
+    lines.append("📊 **NYC TAXI WEEKLY REPORT**")
+    lines.append(f"*{week_display}*")
     lines.append("")
 
-    # Section 2: Detailed Data Aggregation (for Discord only)
-    if for_discord:
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        lines.append("📊 DATA AGREGASI HARIAN")
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-        # Aggregate trips and revenue by date
-        if "date" in df_trips.columns and not df_trips.empty:
-            trips_by_date = df_trips.groupby("date")["total_trips"].sum()
-            revenue_col = "total_revenue_per_day" if "total_revenue_per_day" in df_revenue.columns else "total_revenue"
-            if "date" in df_revenue.columns and not df_revenue.empty:
-                revenue_by_date = df_revenue.groupby("date")[revenue_col].sum()
-
-                lines.append("```")
-                lines.append(f"{'Tanggal':<12} {'Trips':>10} {'Pendapatan':>15}")
-                lines.append("-" * 40)
-                for date in sorted(trips_by_date.index):
-                    trips = trips_by_date.get(date, 0)
-                    revenue = revenue_by_date.get(date, 0)
-                    lines.append(f"{str(date):<12} {_fmt_int(trips):>10} {_fmt_money(revenue):>15}")
-                lines.append("```")
-                lines.append("")
-
-    # Section 3: Peak Hours Analysis
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("⏰ ANALISIS JAM PUNCAK")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append(f"• Jam Tersibuk (Top 3)    : {peak_hours or 'Data tidak tersedia'}")
+    # Key Metrics
+    lines.append("**📈 WEEKLY SUMMARY**")
+    lines.append(f"• Total Trips: **{_fmt_int(total_trips)}**")
+    lines.append(f"• Total Revenue: **{_fmt_money(total_revenue)}**")
+    lines.append(f"• Daily Average: {_fmt_int(daily_avg_trips)} trips | {_fmt_money(daily_avg_revenue)}")
+    if avg_rev_trip:
+        lines.append(f"• Avg Revenue/Trip: {_fmt_money(avg_rev_trip)}")
     lines.append("")
 
-    # Section 4: Performance Highlights
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("🏆 HIGHLIGHT PERFORMA")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    # Daily breakdown (Discord only)
+    if for_discord and "date" in df_trips.columns and not df_trips.empty:
+        lines.append("**📊 DAILY BREAKDOWN**")
+        trips_by_date = df_trips.groupby("date")["total_trips"].sum()
+        if "date" in df_revenue.columns and not df_revenue.empty:
+            revenue_by_date = df_revenue.groupby("date")[revenue_col].sum()
+            lines.append("```")
+            lines.append(f"{'Date':<12} {'Trips':>10} {'Revenue':>15}")
+            lines.append("-" * 40)
+            for date in sorted(trips_by_date.index):
+                trips = trips_by_date.get(date, 0)
+                revenue = revenue_by_date.get(date, 0)
+                lines.append(f"{str(date):<12} {_fmt_int(trips):>10} {_fmt_money(revenue):>15}")
+            lines.append("```")
+            lines.append("")
+
+    # Performance insights
+    lines.append("**🏆 PERFORMANCE HIGHLIGHTS**")
+    if peak_hours:
+        lines.append(f"• Busiest Hours: {peak_hours}")
     if best_day:
-        lines.append(f"• Hari dengan Revenue Tertinggi  : {best_day}")
+        lines.append(f"• Best Day: {best_day}")
     if worst_day:
-        lines.append(f"• Hari dengan Revenue Terendah   : {worst_day}")
+        lines.append(f"• Lowest Day: {worst_day}")
     lines.append("")
 
-    # Section 5: Anomaly Detection
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("🔍 DETEKSI ANOMALI")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    # Anomaly status
+    lines.append("**🔍 STATUS**")
     if total_anomaly_count > 0:
-        lines.append(f"• Total Anomali Terdeteksi : {total_anomaly_count} kejadian")
-        lines.append("")
-        lines.append("Detail Anomali per Hari:")
-        for reason in anomalies:
-            lines.append(f"  • {reason}")
+        lines.append(f"⚠️ {total_anomaly_count} anomalies detected - review recommended")
     else:
-        lines.append("• Status: Tidak ada anomali signifikan terdeteksi pada periode ini.")
-        lines.append("• Indikasi: Operasional berjalan normal dan stabil.")
-
+        lines.append("✅ All metrics within normal range")
     lines.append("")
 
-    # Section 6: Recommendations
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("💡 REKOMENDASI TINDAK LANJUT")
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    if total_anomaly_count > 0:
-        lines.append("1. Lakukan review mendalam terhadap anomali yang teridentifikasi untuk")
-        lines.append("   mendeteksi pola atau potensi masalah sistemik.")
-        lines.append("2. Evaluasi faktor penyebab pada periode dengan anomali tinggi.")
-        lines.append("3. Koordinasikan dengan tim operasional untuk implementasi mitigasi")
-        lines.append("   pada minggu mendatang.")
-    else:
-        lines.append("1. Performa operasional menunjukkan stabilitas yang baik.")
-        lines.append("2. Pertahankan standar operasi dan protokol yang telah berjalan.")
-        lines.append("3. Lanjutkan pemantauan rutin, khususnya pada jam-jam puncak")
-        lines.append("   yang telah teridentifikasi.")
-
-    lines.append("")
-    lines.append("=" * 70)
-    lines.append(f"Periode Laporan  : {week_display}")
-    lines.append(f"Tanggal Generate : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append("Sistem Pelaporan : NYC Taxi Data Pipeline - Automated Monitoring")
-    lines.append("=" * 70)
+    # Footer
+    lines.append("─" * 50)
+    lines.append(f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | NYC Taxi Data Pipeline*")
 
     return "\n".join(lines)
 
 
 def build_email_message_with_csv_explanation(week_name: str) -> str:
-    """Build formal email message explaining the aggregated data and CSV files."""
+    """Build professional email message with CSV data explanation."""
     week_info = parse_week_name(week_name)
-    week_display = f"Minggu ke-{week_info['week_num']}, {week_info['month']} {week_info['year']}"
+    week_display = f"Week {week_info['week_num']}, {week_info['month']} {week_info['year']}"
 
-    message = f"""Kepada Yth. Tim Monitoring dan Analisis Data,
+    message = f"""Dear Team,
 
-Dengan hormat,
+Please find attached the NYC Taxi Weekly Data Report for {week_display}.
 
-Bersama email ini, kami sampaikan Laporan Agregasi Data Mingguan NYC Taxi Data Pipeline untuk periode {week_display}.
-
-TUJUAN LAPORAN
+ATTACHED FILES
 ==============
-Laporan ini bertujuan untuk memberikan gambaran komprehensif mengenai performa operasional layanan taksi NYC berdasarkan data yang telah dikumpulkan dan diproses melalui sistem data pipeline otomatis. Analisis ini mencakup metrik kunci, tren performa, dan identifikasi anomali yang memerlukan perhatian.
+This report includes 5 CSV files with aggregated metrics:
 
-PENJELASAN DATA AGREGASI
-=========================
+1. Trips Per Day - Daily trip volume by taxi type
+2. Revenue Per Day - Daily revenue totals by taxi type
+3. Peak Hour Analysis - Hourly trip distribution patterns
+4. Daily Avg Metrics - Average trip metrics (distance, fare, duration, passengers)
+5. Anomaly Monitoring - Statistical anomaly detection and alerts
 
-Terlampir pada email ini adalah file-file CSV yang berisi data agregasi mingguan sebagai berikut:
+KEY INSIGHTS
+============
+• The data covers {week_display} with comprehensive trip and revenue analysis
+• Files are ready for import into Excel, Tableau, or other analytics tools
+• Anomalies are flagged for operational review and action planning
+• All metrics include date, taxi type, and relevant measurements
 
-1. TRIPS_PER_DAY.CSV
-   - Deskripsi: Agregasi jumlah perjalanan (trips) per hari
-   - Kolom utama: date, taxi_type, total_trips
-   - Kegunaan: Menganalisis volume perjalanan harian dan tren mobilitas
-   - Insight: Membantu mengidentifikasi pola permintaan layanan taksi
+NEXT STEPS
+==========
+• Review the anomaly_monitoring.csv for any flagged issues
+• Compare metrics with previous weeks to identify trends
+• Use peak_hour data to optimize fleet allocation
+• Share findings with operations team for strategic planning
 
-2. REVENUE_PER_DAY.CSV
-   - Deskripsi: Agregasi total pendapatan (revenue) per hari
-   - Kolom utama: date, taxi_type, total_revenue_per_day
-   - Kegunaan: Evaluasi performa finansial harian
-   - Insight: Mengidentifikasi hari dengan pendapatan tertinggi/terendah
+For questions or additional analysis, please contact the data engineering team.
 
-3. PEAK_HOUR_PER_DAY.CSV
-   - Deskripsi: Analisis jam puncak berdasarkan volume perjalanan
-   - Kolom utama: date, pickup_hour, trips_per_hour
-   - Kegunaan: Identifikasi periode waktu dengan permintaan tertinggi
-   - Insight: Optimasi alokasi armada dan strategi operasional
+Best regards,
 
-4. DAILY_AVG_METRICS.CSV
-   - Deskripsi: Rata-rata metrik operasional harian
-   - Kolom utama: date, avg_total_amount, avg_trip_distance,
-                 avg_trip_duration, avg_passenger_count
-   - Kegunaan: Evaluasi efisiensi operasional dan pengalaman pelanggan
-   - Insight: Benchmark performa dan identifikasi area perbaikan
-
-5. ANOMALY_MONITORING.CSV
-   - Deskripsi: Deteksi dan monitoring anomali operasional
-   - Kolom utama: date, is_anomaly, daily_trips, total_revenue_per_day,
-                 avg_passenger_count
-   - Kegunaan: Early warning system untuk deviasi operasional
-   - Insight: Identifikasi masalah potensial yang memerlukan investigasi
-
-METODOLOGI AGREGASI
-====================
-Data agregasi dihasilkan melalui proses sebagai berikut:
-• Ekstraksi data mentah dari sumber NYC TLC (Taxi & Limousine Commission)
-• Pembersihan dan validasi data menggunakan Apache PySpark
-• Agregasi statistik berdasarkan dimensi waktu (hari, jam)
-• Analisis anomali menggunakan metode statistik (±2σ deviation)
-• Export hasil ke format CSV untuk kemudahan analisis lanjutan
-
-REKOMENDASI PENGGUNAAN
-======================
-1. Gunakan file CSV terlampir untuk analisis mendalam dan visualisasi data
-2. Fokuskan perhatian pada anomali yang teridentifikasi
-3. Bandingkan metrik mingguan dengan periode sebelumnya untuk trend analysis
-4. Koordinasikan temuan dengan tim operasional untuk action planning
-
-Apabila terdapat pertanyaan atau memerlukan klarifikasi lebih lanjut mengenai data yang dilampirkan, silakan menghubungi tim data engineering.
-
-Terima kasih atas perhatian dan kerjasamanya.
-
-Hormat kami,
-
-NYC Taxi Data Pipeline - Automated Monitoring System
+NYC Taxi Data Pipeline - Automated Reporting
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 ---
-Catatan: Email ini digenerate secara otomatis oleh sistem. File CSV terlampir berisi data agregasi untuk periode {week_display}.
+Note: This is an automated report. CSV files contain aggregated data for {week_display}.
 """
     return message
 
@@ -475,13 +366,10 @@ def send_to_discord(webhook_url: str, message: str) -> None:
     # Discord limit: 2000 characters per message
     MAX_LENGTH = 1900  # Leave some buffer
 
-    # Tambahkan mention untuk user samsudinde di pesan pertama
-    mention_message = f"<@samsudinde>\n{message}"
-
     # Split message jika terlalu panjang
-    if len(mention_message) <= 2000:
+    if len(message) <= 2000:
         # Send as single message
-        payload = {"content": mention_message}
+        payload = {"content": message}
         try:
             resp = requests.post(webhook_url, json=payload, timeout=10)
         except requests.RequestException as e:
@@ -490,7 +378,7 @@ def send_to_discord(webhook_url: str, message: str) -> None:
             raise RuntimeError(f"Discord returned status {resp.status_code}: {resp.text}")
     else:
         # Split into multiple messages
-        lines = mention_message.split('\n')
+        lines = message.split('\n')
         chunks = []
         current_chunk = []
         current_length = 0
@@ -718,8 +606,16 @@ def main() -> None:
             for_discord=True,  # Include detailed aggregation tables
         )
 
-        # Email message with CSV explanation
-        email_message = build_email_message_with_csv_explanation(week_name)
+        # Email message - use same format as Discord (without detailed daily breakdown)
+        email_message = build_weekly_report_message(
+            df_trips=df_trips,
+            df_revenue=df_revenue,
+            df_peak=df_peak,
+            df_metrics=df_metrics,
+            df_anomaly=df_anomaly,
+            week_name=week_name,
+            for_discord=False,  # Don't include detailed daily breakdown in email
+        )
 
         # Collect CSV file paths for email attachments
         csv_files = [p_trips, p_revenue, p_peak, p_metrics, p_anom]
@@ -771,7 +667,7 @@ def main() -> None:
             try:
                 logger.info("Sending report to Discord")
                 send_to_discord(DISCORD_WEBHOOK_URL, discord_message)
-                msg_len = len(f"<@samsudinde>\n{discord_message}")
+                msg_len = len(discord_message)
                 if msg_len > 2000:
                     num_parts = (msg_len // 1900) + 1
                     logger.info(f"Discord message sent successfully ({num_parts} parts)")
@@ -791,7 +687,7 @@ def main() -> None:
             try:
                 logger.info(f"Sending email with {len(csv_files)} CSV attachments to {len(GMAIL_RECIPIENT_EMAILS)} recipients")
                 week_info = parse_week_name(week_name)
-                email_subject = f"[NYC Taxi Pipeline] Laporan Agregasi Data Mingguan - {week_info['month']} {week_info['year']}, Minggu ke-{week_info['week_num']}"
+                email_subject = f"NYC Taxi Weekly Report - {week_info['month']} {week_info['year']}, Week {week_info['week_num']}"
                 send_to_gmail(
                     sender_email=GMAIL_SENDER_EMAIL,
                     sender_password=GMAIL_SENDER_PASSWORD,

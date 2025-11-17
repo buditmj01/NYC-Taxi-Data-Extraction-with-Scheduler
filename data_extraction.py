@@ -1,7 +1,7 @@
 """
 NYC Taxi Data Extraction Pipeline
 
-Combines Green and Yellow taxi data from parquet files.
+Combines Green and Yellow taxi data from parquet files using PyArrow & Pandas.
 - Daily: Processes a single date and saves to Parquet file
 - Daily-Range: Processes multiple consecutive days in one command (efficient!)
 - Weekly: Sends accumulated daily data to PostgreSQL database or saves as Parquet
@@ -25,10 +25,10 @@ import argparse
 import logging
 from pathlib import Path
 from datetime import datetime, timedelta
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import (
-    col, month, year, weekofyear, to_date, concat_ws, lit, current_timestamp
-)
+import pandas as pd
+import pyarrow.parquet as pq
+import pyarrow as pa
+from sqlalchemy import create_engine
 
 # ============================================================================
 # CONFIGURATION
@@ -52,8 +52,8 @@ POSTGRES_DB = os.getenv("POSTGRES_DB", "nyc_taxi_db")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
 
-# JDBC URL
-JDBC_URL = f"jdbc:postgresql://{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+# SQLAlchemy URL
+SQLALCHEMY_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
 
 # ============================================================================
 # LOGGING CONFIGURATION
@@ -82,80 +82,76 @@ def create_processed_dir():
     print(f"✓ Daily directory ready: {DAILY_OUTPUT_DIR}\n")
 
 
-def load_data(spark):
+def load_data():
     """Load green and yellow taxi data."""
     print("=" * 70)
     print("LOADING DATA")
     print("=" * 70)
-    
+
     print(f"Loading Green taxi data: {GREEN_FILE}")
-    green_df = spark.read.parquet(GREEN_FILE)
-    print(f"  → Rows: {green_df.count():,}")
-    
+    green_df = pd.read_parquet(GREEN_FILE)
+    print(f"  → Rows: {len(green_df):,}")
+
     print(f"\nLoading Yellow taxi data: {YELLOW_FILE}")
-    yellow_df = spark.read.parquet(YELLOW_FILE)
-    print(f"  → Rows: {yellow_df.count():,}\n")
-    
+    yellow_df = pd.read_parquet(YELLOW_FILE)
+    print(f"  → Rows: {len(yellow_df):,}\n")
+
     return green_df, yellow_df
 
 
 def normalize_columns(green_df, yellow_df):
     """
     Normalize column names so both datasets can be combined.
-    
+
     Green taxi columns:
       - lpep_pickup_datetime, lpep_dropoff_datetime
-    
+
     Yellow taxi columns:
       - tpep_pickup_datetime, tpep_dropoff_datetime
     """
     print("=" * 70)
     print("NORMALIZING COLUMNS")
     print("=" * 70)
-    
+
     # Rename green columns to match yellow
-    green_normalized = green_df.withColumnRenamed(
-        "lpep_pickup_datetime", "pickup_datetime"
-    ).withColumnRenamed(
-        "lpep_dropoff_datetime", "dropoff_datetime"
-    ).withColumn(
-        "taxi_type", lit("Green")
-    )
-    
+    green_normalized = green_df.rename(columns={
+        "lpep_pickup_datetime": "pickup_datetime",
+        "lpep_dropoff_datetime": "dropoff_datetime"
+    }).copy()
+    green_normalized["taxi_type"] = "Green"
+
     # Rename yellow columns
-    yellow_normalized = yellow_df.withColumnRenamed(
-        "tpep_pickup_datetime", "pickup_datetime"
-    ).withColumnRenamed(
-        "tpep_dropoff_datetime", "dropoff_datetime"
-    ).withColumn(
-        "taxi_type", lit("Yellow")
-    )
-    
+    yellow_normalized = yellow_df.rename(columns={
+        "tpep_pickup_datetime": "pickup_datetime",
+        "tpep_dropoff_datetime": "dropoff_datetime"
+    }).copy()
+    yellow_normalized["taxi_type"] = "Yellow"
+
     print("✓ Column names normalized")
     print("✓ Added 'taxi_type' column\n")
-    
+
     return green_normalized, yellow_normalized
 
 
 def combine_data(green_df, yellow_df):
-    """Combine green and yellow data using union."""
+    """Combine green and yellow data using concat."""
     print("=" * 70)
     print("COMBINING DATA")
     print("=" * 70)
-    
+
     # Get common columns
-    common_cols = set(green_df.columns) & set(yellow_df.columns)
-    common_cols_list = sorted(list(common_cols))
-    
-    # Select common columns and union
-    combined_df = green_df.select(common_cols_list).unionByName(
-        yellow_df.select(common_cols_list)
-    )
-    
+    common_cols = sorted(list(set(green_df.columns) & set(yellow_df.columns)))
+
+    # Select common columns and concatenate
+    combined_df = pd.concat([
+        green_df[common_cols],
+        yellow_df[common_cols]
+    ], ignore_index=True)
+
     print(f"✓ Data combined")
-    print(f"  → Total rows: {combined_df.count():,}")
+    print(f"  → Total rows: {len(combined_df):,}")
     print(f"  → Total columns: {len(combined_df.columns)}\n")
-    
+
     return combined_df
 
 
@@ -165,11 +161,18 @@ def filter_by_date(df, target_date):
     print(f"FILTERING DATA - Date: {target_date}")
     print("=" * 70)
 
-    filtered_df = df.filter(
-        to_date(col("pickup_datetime")) == target_date
-    )
+    # Convert pickup_datetime to date
+    df['pickup_date'] = pd.to_datetime(df['pickup_datetime']).dt.date
 
-    row_count = filtered_df.count()
+    # Convert target_date string to date object
+    target_date_obj = datetime.strptime(target_date, "%Y-%m-%d").date()
+
+    filtered_df = df[df['pickup_date'] == target_date_obj].copy()
+
+    # Drop the temporary column
+    filtered_df = filtered_df.drop(columns=['pickup_date'])
+
+    row_count = len(filtered_df)
     print(f"✓ Filtered to date: {target_date}")
     print(f"  → Rows after filter: {row_count:,}\n")
 
@@ -177,79 +180,56 @@ def filter_by_date(df, target_date):
 
 
 def save_daily_parquet(df, date_str):
-    """Save daily data to parquet file as a single file (not a folder)."""
-    import shutil
-
+    """Save daily data to parquet file as a single file."""
     print("=" * 70)
     print("SAVING DAILY DATA TO PARQUET")
     print("=" * 70)
 
-    # Use temporary folder for Spark output
-    temp_output = DAILY_OUTPUT_DIR / f"_temp_taxi_data_{date_str}"
     final_output = DAILY_OUTPUT_DIR / f"taxi_data_{date_str}.parquet"
 
-    # Remove existing files if they exist
-    if temp_output.exists():
-        shutil.rmtree(temp_output)
+    # Remove existing file if it exists
     if final_output.exists():
-        if final_output.is_dir():
-            shutil.rmtree(final_output)
-        else:
-            final_output.unlink()
+        final_output.unlink()
 
-    # Save as single file using coalesce(1)
-    df.coalesce(1).write.mode("overwrite").parquet(str(temp_output))
+    # Save using PyArrow
+    table = pa.Table.from_pandas(df)
+    pq.write_table(table, str(final_output))
 
-    # Find the part file and rename it
-    part_files = list(temp_output.glob("part-*.parquet"))
-    if part_files:
-        shutil.move(str(part_files[0]), str(final_output))
-        # Clean up temp folder
-        shutil.rmtree(temp_output)
-    else:
-        # Fallback: rename the whole folder
-        shutil.move(str(temp_output), str(final_output))
-
-    file_size = final_output.stat().st_size if final_output.is_file() else get_file_size(str(final_output))
+    file_size = final_output.stat().st_size
 
     print(f"✓ Saved to: {final_output}")
-    print(f"  → File type: {'Single file' if final_output.is_file() else 'Folder'}")
-    print(f"  → Size: {format_bytes(file_size) if final_output.is_file() else get_file_size(str(final_output))}\n")
+    print(f"  → File type: Single file")
+    print(f"  → Size: {format_bytes(file_size)}\n")
 
     return final_output
 
 
-def load_weekly_data(spark):
+def load_weekly_data():
     """Load all daily parquet files for the week."""
     print("=" * 70)
     print("LOADING WEEKLY DATA FROM DAILY FILES")
     print("=" * 70)
 
-    daily_files = list(DAILY_OUTPUT_DIR.glob("taxi_data_*.parquet"))
+    daily_files = sorted(list(DAILY_OUTPUT_DIR.glob("taxi_data_*.parquet")))
 
     if not daily_files:
         print("✗ No daily files found")
         return None
 
     print(f"Found {len(daily_files)} daily file(s):")
-    for f in sorted(daily_files):
+    for f in daily_files:
         print(f"  - {f.name}")
 
     # Read all daily files
     dfs = []
     for file in daily_files:
-        df = spark.read.parquet(str(file))
+        df = pd.read_parquet(str(file))
         dfs.append(df)
 
-    # Union all dataframes
-    if len(dfs) == 1:
-        combined_df = dfs[0]
-    else:
-        combined_df = dfs[0]
-        for df in dfs[1:]:
-            combined_df = combined_df.union(df)
+    # Concatenate all dataframes
+    combined_df = pd.concat(dfs, ignore_index=True)
 
-    row_count = combined_df.count()
+    row_count = len(combined_df)
     print(f"\n✓ Combined {len(dfs)} daily file(s)")
     print(f"  → Total rows: {row_count:,}\n")
 
@@ -279,8 +259,8 @@ def get_week_number_from_daily_files():
         return "weekly_taxi_data"
 
 
-def save_to_postgres(df, table_name, mode="overwrite"):
-    """Save data to PostgreSQL database."""
+def save_to_postgres(df, table_name, mode="replace"):
+    """Save data to PostgreSQL database using SQLAlchemy."""
     print("=" * 70)
     print("SAVING TO POSTGRESQL")
     print("=" * 70)
@@ -290,18 +270,20 @@ def save_to_postgres(df, table_name, mode="overwrite"):
         print(f"Table: {table_name}")
         print(f"Mode: {mode}")
 
-        # Write to PostgreSQL
-        df.write \
-            .format("jdbc") \
-            .option("url", JDBC_URL) \
-            .option("dbtable", table_name) \
-            .option("user", POSTGRES_USER) \
-            .option("password", POSTGRES_PASSWORD) \
-            .option("driver", "org.postgresql.Driver") \
-            .mode(mode) \
-            .save()
+        # Create SQLAlchemy engine
+        engine = create_engine(SQLALCHEMY_URL)
 
-        row_count = df.count()
+        # Write to PostgreSQL
+        df.to_sql(
+            table_name,
+            engine,
+            if_exists=mode,
+            index=False,
+            method='multi',
+            chunksize=10000
+        )
+
+        row_count = len(df)
         print(f"✓ Successfully saved {row_count:,} rows to PostgreSQL")
         print(f"✓ Table '{table_name}' created/updated\n")
 
@@ -323,7 +305,7 @@ def format_bytes(size_bytes):
 
 
 def save_weekly_parquet(df, week_name):
-    """Save weekly data to parquet file as a single file (not a folder).
+    """Save weekly data to parquet file as a single file.
 
     Args:
         df: DataFrame to save
@@ -332,8 +314,6 @@ def save_weekly_parquet(df, week_name):
     Returns:
         Path to saved parquet file
     """
-    import shutil
-
     print("=" * 70)
     print("SAVING WEEKLY PARQUET")
     print("=" * 70)
@@ -342,62 +322,31 @@ def save_weekly_parquet(df, week_name):
     weekly_output_dir = PROCESSED_DATA_DIR / "weekly"
     weekly_output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use temporary folder for Spark output
-    temp_output = weekly_output_dir / f"_temp_{week_name}"
     final_output = weekly_output_dir / f"{week_name}.parquet"
 
     print(f"Output: {final_output}\n")
 
-    # Remove existing files if they exist
-    if temp_output.exists():
-        shutil.rmtree(temp_output)
+    # Remove existing file if it exists
     if final_output.exists():
         if final_output.is_dir():
+            import shutil
             shutil.rmtree(final_output)
         else:
             final_output.unlink()
 
-    # Save as single file using coalesce(1)
-    df.coalesce(1).write.mode("overwrite").parquet(str(temp_output))
+    # Save using PyArrow
+    table = pa.Table.from_pandas(df)
+    pq.write_table(table, str(final_output))
 
-    # Find the part file and rename it
-    part_files = list(temp_output.glob("part-*.parquet"))
-    if part_files:
-        shutil.move(str(part_files[0]), str(final_output))
-        # Clean up temp folder
-        shutil.rmtree(temp_output)
-    else:
-        # Fallback: rename the whole folder
-        shutil.move(str(temp_output), str(final_output))
-
-    row_count = df.count()
-    file_size = final_output.stat().st_size if final_output.is_file() else 0
+    row_count = len(df)
+    file_size = final_output.stat().st_size
 
     print(f"✓ Successfully saved {row_count:,} rows")
     print(f"  File: {final_output.name}")
-    print(f"  File type: {'Single file' if final_output.is_file() else 'Folder'}")
-    print(f"  Size: {format_bytes(file_size) if final_output.is_file() else get_file_size(str(final_output))}\n")
+    print(f"  File type: Single file")
+    print(f"  Size: {format_bytes(file_size)}\n")
 
     return final_output
-
-
-def get_file_size(file_path):
-    """Get human-readable file size."""
-    try:
-        size_bytes = sum(
-            f.stat().st_size
-            for f in Path(file_path).rglob("*")
-            if f.is_file()
-        )
-
-        for unit in ["B", "KB", "MB", "GB"]:
-            if size_bytes < 1024:
-                return f"{size_bytes:.2f} {unit}"
-            size_bytes /= 1024
-
-        return f"{size_bytes:.2f} TB"
-    except:
-        return "unknown"
 
 
 def print_summary(combined_df):
@@ -405,45 +354,26 @@ def print_summary(combined_df):
     print("=" * 70)
     print("DATA SUMMARY")
     print("=" * 70)
-    
-    print(f"Total Rows: {combined_df.count():,}")
+
+    print(f"Total Rows: {len(combined_df):,}")
     print(f"Total Columns: {len(combined_df.columns)}")
     print(f"\nColumns: {', '.join(combined_df.columns)}\n")
-    
+
     # Show sample
     print("Sample data (first 3 rows):")
     selected_cols = ["taxi_type", "pickup_datetime", "trip_distance", "fare_amount", "total_amount"]
-    combined_df.select(selected_cols).show(3, truncate=False)
+    print(combined_df[selected_cols].head(3).to_string(index=False))
+    print()
 
 
-def download_postgres_jdbc():
-    """Download PostgreSQL JDBC driver if not present."""
-    import urllib.request
-
-    jdbc_dir = ROOT_DIR / "jdbc"
-    jdbc_file = jdbc_dir / "postgresql-42.6.0.jar"
-
-    if jdbc_file.exists():
-        return str(jdbc_file)
-
-    print("Downloading PostgreSQL JDBC driver...")
-    jdbc_dir.mkdir(exist_ok=True)
-
-    jdbc_url = "https://jdbc.postgresql.org/download/postgresql-42.6.0.jar"
-    urllib.request.urlretrieve(jdbc_url, str(jdbc_file))
-
-    print(f"✓ JDBC driver downloaded to: {jdbc_file}\n")
-    return str(jdbc_file)
-
-
-def process_daily(spark, date_str):
+def process_daily(date_str):
     """Process daily data and save to Parquet."""
     print(f"\n{'='*70}")
     print(f"DAILY PROCESSING MODE - Date: {date_str}")
     print(f"{'='*70}\n")
 
     # Load raw data
-    green_df, yellow_df = load_data(spark)
+    green_df, yellow_df = load_data()
 
     # Normalize columns
     green_norm, yellow_norm = normalize_columns(green_df, yellow_df)
@@ -473,11 +403,10 @@ def process_daily(spark, date_str):
     print(f"Output: {output_file}\n")
 
 
-def process_daily_range(spark, start_date_str, num_days=7):
+def process_daily_range(start_date_str, num_days=7):
     """Process multiple consecutive days in one command.
 
     Args:
-        spark: SparkSession
         start_date_str: Starting date in YYYY-MM-DD format
         num_days: Number of consecutive days to process (default: 7)
     """
@@ -493,7 +422,7 @@ def process_daily_range(spark, start_date_str, num_days=7):
         return
 
     # Load raw data once (more efficient than loading for each day)
-    green_df, yellow_df = load_data(spark)
+    green_df, yellow_df = load_data()
 
     # Normalize columns once
     green_norm, yellow_norm = normalize_columns(green_df, yellow_df)
@@ -540,11 +469,10 @@ def process_daily_range(spark, start_date_str, num_days=7):
     print(f"  → python data_extraction.py --mode weekly\n")
 
 
-def process_weekly(spark, output_format="postgres"):
+def process_weekly(output_format="postgres"):
     """Load weekly data from daily files and save to PostgreSQL or Parquet.
 
     Args:
-        spark: SparkSession
         output_format: 'postgres' or 'parquet' (default: 'postgres')
     """
     print(f"\n{'='*70}")
@@ -552,7 +480,7 @@ def process_weekly(spark, output_format="postgres"):
     print(f"{'='*70}\n")
 
     # Load all daily parquet files
-    weekly_df = load_weekly_data(spark)
+    weekly_df = load_weekly_data()
 
     if weekly_df is None:
         print("✗ No daily data found. Run daily processing first.")
@@ -569,7 +497,7 @@ def process_weekly(spark, output_format="postgres"):
     if output_format == "parquet":
         output_file = save_weekly_parquet(weekly_df, week_name)
     else:  # postgres
-        save_to_postgres(weekly_df, week_name, mode="overwrite")
+        save_to_postgres(weekly_df, week_name, mode="replace")
 
     # Print summary
     print_summary(weekly_df)
@@ -639,18 +567,6 @@ def main():
     print("█" * 70)
     print("\n")
 
-    # Download JDBC driver (needed for weekly mode)
-    jdbc_path = download_postgres_jdbc()
-
-    # Initialize Spark
-    spark = SparkSession.builder \
-        .appName("Taxi_Data_Extraction") \
-        .config("spark.jars", jdbc_path) \
-        .config("spark.driver.extraClassPath", jdbc_path) \
-        .getOrCreate()
-
-    spark.sparkContext.setLogLevel("ERROR")
-
     try:
         # Create directories
         create_processed_dir()
@@ -658,15 +574,15 @@ def main():
         # Execute based on mode
         if args.mode == "daily":
             logger.info(f"Processing daily mode for date: {args.date}")
-            process_daily(spark, args.date)
+            process_daily(args.date)
             logger.info(f"Daily processing completed successfully for {args.date}")
         elif args.mode == "daily-range":
             logger.info(f"Processing daily-range mode: {args.days} days starting from {args.date}")
-            process_daily_range(spark, args.date, args.days)
+            process_daily_range(args.date, args.days)
             logger.info(f"Daily-range processing completed successfully for {args.days} days")
         elif args.mode == "weekly":
             logger.info(f"Processing weekly mode with output: {args.output}")
-            process_weekly(spark, args.output)
+            process_weekly(args.output)
             logger.info(f"Weekly processing completed successfully to {args.output}")
 
         logger.info("=" * 70)
@@ -677,10 +593,6 @@ def main():
         logger.error(f"Pipeline failed with error: {str(e)}", exc_info=True)
         print(f"\n✗ ERROR: {str(e)}\n")
         raise
-
-    finally:
-        logger.info("Stopping Spark session")
-        spark.stop()
 
 
 if __name__ == "__main__":

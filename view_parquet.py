@@ -3,7 +3,7 @@
 Simple Parquet File Viewer for NYC Taxi Data
 
 Displays data types and report-related columns (7 columns) with first 5 rows
-for both Green and Yellow taxi datasets.
+for both Green and Yellow taxi datasets using PyArrow & Pandas.
 
 Report-related columns:
 - VendorID
@@ -15,7 +15,7 @@ Report-related columns:
 """
 
 from pathlib import Path
-from pyspark.sql import SparkSession
+import pandas as pd
 
 # File paths
 ROOT_DIR = Path(__file__).resolve().parent
@@ -27,13 +27,9 @@ YELLOW_FILE = str(DATA_DIR / "yellow_tripdata_2025-09.parquet")
 def main():
     """Load and display taxi data with data types and sample rows."""
 
-    # Initialize Spark
-    spark = SparkSession.builder.appName("Taxi_Data_Viewer").getOrCreate()
-    spark.sparkContext.setLogLevel("ERROR")
-
     # Load data
-    green_df = spark.read.parquet(GREEN_FILE)
-    yellow_df = spark.read.parquet(YELLOW_FILE)
+    green_df = pd.read_parquet(GREEN_FILE)
+    yellow_df = pd.read_parquet(YELLOW_FILE)
 
     # ========================================================================
     # GREEN TAXI DATA
@@ -41,11 +37,12 @@ def main():
     print("=" * 70)
     print("GREEN TAXI DATA")
     print("=" * 70)
-    print(f"Total Rows: {green_df.count():,}\n")
+    print(f"Total Rows: {len(green_df):,}")
+    print(f"Total Columns: {len(green_df.columns)}\n")
 
     # Show data types
     print("Data Types:")
-    for col_name, col_type in green_df.dtypes:
+    for col_name, col_type in green_df.dtypes.items():
         print(f"  {col_name}: {col_type}")
 
     # Show columns used in reports
@@ -59,7 +56,7 @@ def main():
         "fare_amount",
         "total_amount"
     ]
-    green_df.select(selected_cols).show(5, truncate=False)
+    print(green_df[selected_cols].head(5).to_string(index=False))
 
     # ========================================================================
     # YELLOW TAXI DATA
@@ -67,11 +64,12 @@ def main():
     print("\n" + "=" * 70)
     print("YELLOW TAXI DATA")
     print("=" * 70)
-    print(f"Total Rows: {yellow_df.count():,}\n")
+    print(f"Total Rows: {len(yellow_df):,}")
+    print(f"Total Columns: {len(yellow_df.columns)}\n")
 
     # Show data types
     print("Data Types:")
-    for col_name, col_type in yellow_df.dtypes:
+    for col_name, col_type in yellow_df.dtypes.items():
         print(f"  {col_name}: {col_type}")
 
     # Show columns used in reports
@@ -85,10 +83,7 @@ def main():
         "fare_amount",
         "total_amount"
     ]
-    yellow_df.select(selected_cols).show(5, truncate=False)
-
-    # Stop Spark
-    spark.stop()
+    print(yellow_df[selected_cols].head(5).to_string(index=False))
 
 
 if __name__ == "__main__":

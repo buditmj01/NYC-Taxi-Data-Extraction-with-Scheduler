@@ -1,21 +1,10 @@
 """
 NYC Taxi Data Pipeline - Production-Grade OOP Implementation
 
-A modular, object-oriented ETL pipeline for processing NYC taxi data.
+A modular, object-oriented ETL pipeline for processing NYC taxi data using PyArrow & Pandas.
 Reads from PostgreSQL weekly tables, performs data quality checks,
 and generates multiple aggregation outputs.
 
-Architecture:
-- Strategy Pattern: Pluggable aggregation strategies
-- Builder Pattern: Fluent API for engine configuration
-- Dependency Injection: Configurable pipeline components
-- SOLID Principles: Single responsibility, extensibility
-
-Standardization:
-- Date Format: YYYY-MM-DD (ISO 8601) - sortable, unambiguous, database-friendly
-- File Naming: {YYYY}_{MM}_week{N}_{metric}.csv (e.g., 2025_09_week1_trips_per_day.csv)
-- Output Structure: output/{week_name}/ (e.g., output/week_1_september_2025/)
-- Benefits: Self-documenting, sortable, searchable, organized, portable, archivable
 """
 
 import os
@@ -25,13 +14,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import logging
-
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql.functions import (
-    col, to_date, date_format, hour, count, sum as spark_sum,
-    avg, stddev, round as spark_round, when, lit, unix_timestamp, lag
-)
-from pyspark.sql.window import Window
+import pandas as pd
+import numpy as np
+from sqlalchemy import create_engine
 
 
 # ============================================================================
@@ -71,7 +56,7 @@ def setup_logging():
 # 8. No locale issues - works the same across different regional settings
 #
 # Example: 2025-09-01 (Year-Month-Day)
-STANDARD_DATE_FORMAT = "yyyy-MM-dd"
+STANDARD_DATE_FORMAT = "%Y-%m-%d"
 
 # ============================================================================
 # OUTPUT DIRECTORY STRUCTURE
@@ -125,11 +110,6 @@ class PipelineConfig:
     # PostgreSQL table name (to be set via argument)
     postgres_table: str = "week_1_september_2025"
 
-    # Spark configuration
-    app_name: str = "NYC_Taxi_Pipeline"
-    adaptive_execution: bool = True
-    log_level: str = "ERROR"
-
     # Data validation thresholds
     min_trip_distance: float = 0.0
     min_total_amount: float = 0.0
@@ -146,9 +126,9 @@ class PipelineConfig:
         object.__setattr__(self, "output_dir", week_output_dir)
 
     @property
-    def jdbc_url(self) -> str:
-        """Get JDBC URL for PostgreSQL connection."""
-        return f"jdbc:postgresql://{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+    def sqlalchemy_url(self) -> str:
+        """Get SQLAlchemy URL for PostgreSQL connection."""
+        return f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
 
 
 # ============================================================================
@@ -182,13 +162,12 @@ class AggregationError(PipelineError):
 class DataLoader:
     """Handles loading and validation of data from PostgreSQL."""
 
-    def __init__(self, spark: SparkSession, config: PipelineConfig):
-        """Initialize data loader with Spark session and config."""
-        self.spark = spark
+    def __init__(self, config: PipelineConfig):
+        """Initialize data loader with config."""
         self.config = config
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
-    def load_from_postgres(self, table_name: str) -> DataFrame:
+    def load_from_postgres(self, table_name: str) -> pd.DataFrame:
         """
         Load data from PostgreSQL table with validation.
 
@@ -205,16 +184,10 @@ class DataLoader:
         self.logger.info(f"Database: {self.config.postgres_host}:{self.config.postgres_port}/{self.config.postgres_db}")
 
         try:
-            df = self.spark.read \
-                .format("jdbc") \
-                .option("url", self.config.jdbc_url) \
-                .option("dbtable", table_name) \
-                .option("user", self.config.postgres_user) \
-                .option("password", self.config.postgres_password) \
-                .option("driver", "org.postgresql.Driver") \
-                .load()
+            engine = create_engine(self.config.sqlalchemy_url)
+            df = pd.read_sql_table(table_name, engine)
 
-            row_count = df.count()
+            row_count = len(df)
             if row_count == 0:
                 raise DataValidationError(f"Table '{table_name}' is empty")
 
@@ -233,7 +206,7 @@ class SchemaTransformer(ABC):
     """Abstract base class for schema transformation strategies."""
 
     @abstractmethod
-    def transform(self, df: DataFrame) -> DataFrame:
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """Transform DataFrame schema to normalized format."""
         pass
 
@@ -249,15 +222,15 @@ class GreenTaxiTransformer(SchemaTransformer):
     def get_taxi_type(self) -> str:
         return "green"
 
-    def transform(self, df: DataFrame) -> DataFrame:
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Normalize Green taxi schema.
 
         Renames lpep_pickup_datetime to pickup_datetime and adds taxi_type.
         """
-        return (df
-                .withColumnRenamed("lpep_pickup_datetime", "pickup_datetime")
-                .withColumn("taxi_type", lit(self.get_taxi_type())))
+        df = df.rename(columns={"lpep_pickup_datetime": "pickup_datetime"})
+        df["taxi_type"] = self.get_taxi_type()
+        return df
 
 
 class YellowTaxiTransformer(SchemaTransformer):
@@ -266,15 +239,15 @@ class YellowTaxiTransformer(SchemaTransformer):
     def get_taxi_type(self) -> str:
         return "yellow"
 
-    def transform(self, df: DataFrame) -> DataFrame:
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Normalize Yellow taxi schema.
 
         Renames tpep_pickup_datetime to pickup_datetime and adds taxi_type.
         """
-        return (df
-                .withColumnRenamed("tpep_pickup_datetime", "pickup_datetime")
-                .withColumn("taxi_type", lit(self.get_taxi_type())))
+        df = df.rename(columns={"tpep_pickup_datetime": "pickup_datetime"})
+        df["taxi_type"] = self.get_taxi_type()
+        return df
 
 
 # ============================================================================
@@ -289,7 +262,7 @@ class DataCleaner:
         self.config = config
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
-    def clean(self, df: DataFrame) -> DataFrame:
+    def clean(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Clean and validate DataFrame.
 
@@ -304,16 +277,16 @@ class DataCleaner:
         Returns:
             Cleaned DataFrame
         """
-        initial_count = df.count()
+        initial_count = len(df)
         self.logger.info(f"Cleaning data (initial rows: {initial_count:,})")
 
-        cleaned_df = df.filter(
-            (col("trip_distance") > self.config.min_trip_distance) &
-            (col("total_amount") > self.config.min_total_amount) &
-            (col("passenger_count") > self.config.min_passenger_count)
-        )
+        cleaned_df = df[
+            (df["trip_distance"] > self.config.min_trip_distance) &
+            (df["total_amount"] > self.config.min_total_amount) &
+            (df["passenger_count"] > self.config.min_passenger_count)
+        ].copy()
 
-        final_count = cleaned_df.count()
+        final_count = len(cleaned_df)
         removed_count = initial_count - final_count
         removal_pct = (removed_count / initial_count) * 100 if initial_count > 0 else 0
 
@@ -366,7 +339,7 @@ def parse_week_name_to_filename_prefix(week_name: str) -> str:
     return f"{year}_{month_num}_week{week_num}"
 
 
-def standardize_date_column(df: DataFrame, date_column: str) -> DataFrame:
+def standardize_date_column(df: pd.DataFrame, date_column: str) -> pd.DataFrame:
     """
     Standardize date column to YYYY-MM-DD format.
 
@@ -379,10 +352,8 @@ def standardize_date_column(df: DataFrame, date_column: str) -> DataFrame:
     Returns:
         DataFrame with standardized date column
     """
-    return df.withColumn(
-        date_column,
-        date_format(col(date_column), STANDARD_DATE_FORMAT)
-    )
+    df[date_column] = pd.to_datetime(df[date_column]).dt.strftime(STANDARD_DATE_FORMAT)
+    return df
 
 
 # ============================================================================
@@ -393,7 +364,7 @@ class AggregationStrategy(ABC):
     """Abstract base class for aggregation computation strategies."""
 
     @abstractmethod
-    def compute(self, df: DataFrame) -> DataFrame:
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Compute aggregation on DataFrame.
 
@@ -437,15 +408,14 @@ class TripsPerDayAggregation(AggregationStrategy):
             return f"{prefix}_trips_per_day.csv"
         return "trips_per_day.csv"
 
-    def compute(self, df: DataFrame) -> DataFrame:
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         """Count trips by date and taxi type."""
-        df_with_date = df.withColumn("pickup_date", to_date(col("pickup_datetime")))
+        df = df.copy()
+        df["pickup_date"] = pd.to_datetime(df["pickup_datetime"]).dt.date
 
-        result = (df_with_date
-                  .groupBy("pickup_date", "taxi_type")
-                  .agg(count("*").alias("total_trips"))
-                  .withColumnRenamed("pickup_date", "date")
-                  .orderBy("date", "taxi_type"))
+        result = df.groupby(["pickup_date", "taxi_type"]).size().reset_index(name="total_trips")
+        result = result.rename(columns={"pickup_date": "date"})
+        result = result.sort_values(["date", "taxi_type"])
 
         # Standardize date format to YYYY-MM-DD
         return standardize_date_column(result, "date")
@@ -464,15 +434,14 @@ class RevenuePerDayAggregation(AggregationStrategy):
             return f"{prefix}_revenue_per_day.csv"
         return "revenue_per_day.csv"
 
-    def compute(self, df: DataFrame) -> DataFrame:
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         """Sum revenue by date and taxi type."""
-        df_with_date = df.withColumn("pickup_date", to_date(col("pickup_datetime")))
+        df = df.copy()
+        df["pickup_date"] = pd.to_datetime(df["pickup_datetime"]).dt.date
 
-        result = (df_with_date
-                  .groupBy("pickup_date", "taxi_type")
-                  .agg(spark_round(spark_sum("total_amount"), 2).alias("total_revenue_per_day"))
-                  .withColumnRenamed("pickup_date", "date")
-                  .orderBy("date", "taxi_type"))
+        result = df.groupby(["pickup_date", "taxi_type"])["total_amount"].sum().round(2).reset_index()
+        result = result.rename(columns={"pickup_date": "date", "total_amount": "total_revenue_per_day"})
+        result = result.sort_values(["date", "taxi_type"])
 
         # Standardize date format to YYYY-MM-DD
         return standardize_date_column(result, "date")
@@ -491,17 +460,16 @@ class PeakHourAggregation(AggregationStrategy):
             return f"{prefix}_peak_hour_per_day.csv"
         return "peak_hour_per_day.csv"
 
-    def compute(self, df: DataFrame) -> DataFrame:
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         """Find trips per hour for each date and taxi type."""
-        df_with_datetime = df.withColumn("pickup_date", to_date(col("pickup_datetime"))) \
-                            .withColumn("pickup_hour", hour(col("pickup_datetime")))
+        df = df.copy()
+        df["pickup_date"] = pd.to_datetime(df["pickup_datetime"]).dt.date
+        df["pickup_hour"] = pd.to_datetime(df["pickup_datetime"]).dt.hour
 
         # Return all hourly counts (not just peak) for reporting flexibility
-        result = (df_with_datetime
-                  .groupBy("pickup_date", "taxi_type", "pickup_hour")
-                  .agg(count("*").alias("trips_per_hour"))
-                  .withColumnRenamed("pickup_date", "date")
-                  .orderBy("date", "taxi_type", "pickup_hour"))
+        result = df.groupby(["pickup_date", "taxi_type", "pickup_hour"]).size().reset_index(name="trips_per_hour")
+        result = result.rename(columns={"pickup_date": "date"})
+        result = result.sort_values(["date", "taxi_type", "pickup_hour"])
 
         # Standardize date format to YYYY-MM-DD
         return standardize_date_column(result, "date")
@@ -520,21 +488,28 @@ class DailyAvgMetricsAggregation(AggregationStrategy):
             return f"{prefix}_daily_avg_metrics.csv"
         return "daily_avg_metrics.csv"
 
-    def compute(self, df: DataFrame) -> DataFrame:
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate average metrics by date and taxi type."""
-        df_with_date = df.withColumn("pickup_date", to_date(col("pickup_datetime")))
+        df = df.copy()
+        df["pickup_date"] = pd.to_datetime(df["pickup_datetime"]).dt.date
 
-        result = (df_with_date
-                  .groupBy("pickup_date", "taxi_type")
-                  .agg(
-                      spark_round(avg("trip_distance"), 2).alias("avg_trip_distance"),
-                      spark_round(avg("fare_amount"), 2).alias("avg_fare_amount"),
-                      spark_round(avg("total_amount"), 2).alias("avg_total_amount"),
-                      spark_round(avg("passenger_count"), 2).alias("avg_passenger_count"),
-                      spark_round(avg("trip_duration_minutes"), 2).alias("avg_trip_duration_minutes")
-                  )
-                  .withColumnRenamed("pickup_date", "date")
-                  .orderBy("date", "taxi_type"))
+        result = df.groupby(["pickup_date", "taxi_type"]).agg({
+            "trip_distance": "mean",
+            "fare_amount": "mean",
+            "total_amount": "mean",
+            "passenger_count": "mean",
+            "trip_duration_minutes": "mean"
+        }).round(2).reset_index()
+
+        result = result.rename(columns={
+            "pickup_date": "date",
+            "trip_distance": "avg_trip_distance",
+            "fare_amount": "avg_fare_amount",
+            "total_amount": "avg_total_amount",
+            "passenger_count": "avg_passenger_count",
+            "trip_duration_minutes": "avg_trip_duration_minutes"
+        })
+        result = result.sort_values(["date", "taxi_type"])
 
         # Standardize date format to YYYY-MM-DD
         return standardize_date_column(result, "date")
@@ -557,7 +532,7 @@ class AnomalyDetectionAggregation(AggregationStrategy):
             return f"{prefix}_anomaly_monitoring.csv"
         return "anomaly_monitoring.csv"
 
-    def compute(self, df: DataFrame) -> DataFrame:
+    def compute(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Detect anomalies using statistical analysis.
 
@@ -566,52 +541,51 @@ class AnomalyDetectionAggregation(AggregationStrategy):
         - Revenue drops exceeding pct_change_threshold
         - Average passenger count above 2 (unusual for taxis)
         """
-        df_with_date = df.withColumn("pickup_date", to_date(col("pickup_datetime")))
+        df = df.copy()
+        df["pickup_date"] = pd.to_datetime(df["pickup_datetime"]).dt.date
 
-        daily_stats = (df_with_date
-                      .groupBy("pickup_date", "taxi_type")
-                      .agg(
-                          count("*").alias("daily_trips"),
-                          spark_round(spark_sum("total_amount"), 2).alias("total_revenue_per_day"),
-                          spark_round(avg("passenger_count"), 2).alias("avg_passenger_count")
-                      ))
+        daily_stats = df.groupby(["pickup_date", "taxi_type"]).agg({
+            "pickup_datetime": "count",
+            "total_amount": "sum",
+            "passenger_count": "mean"
+        }).reset_index()
+
+        daily_stats = daily_stats.rename(columns={
+            "pickup_datetime": "daily_trips",
+            "total_amount": "total_revenue_per_day",
+            "passenger_count": "avg_passenger_count"
+        })
+        daily_stats["total_revenue_per_day"] = daily_stats["total_revenue_per_day"].round(2)
+        daily_stats["avg_passenger_count"] = daily_stats["avg_passenger_count"].round(2)
 
         # Compute global statistics per taxi type
-        window_spec = Window.partitionBy("taxi_type").orderBy("pickup_date")
-        stats_window = Window.partitionBy("taxi_type")
-
-        anomaly_df = daily_stats.withColumn("prev_day_trips", lag("daily_trips", 1).over(window_spec)) \
-                                .withColumn("avg_trips", avg("daily_trips").over(stats_window)) \
-                                .withColumn("stddev_trips", stddev("daily_trips").over(stats_window))
+        daily_stats = daily_stats.sort_values(["taxi_type", "pickup_date"])
+        daily_stats["prev_day_trips"] = daily_stats.groupby("taxi_type")["daily_trips"].shift(1)
+        daily_stats["avg_trips"] = daily_stats.groupby("taxi_type")["daily_trips"].transform("mean")
+        daily_stats["stddev_trips"] = daily_stats.groupby("taxi_type")["daily_trips"].transform("std")
 
         # Calculate percentage change
-        anomaly_df = anomaly_df.withColumn(
-            "pct_change_trips",
-            when(col("prev_day_trips").isNotNull() & (col("prev_day_trips") > 0),
-                 spark_round(((col("daily_trips") - col("prev_day_trips")) / col("prev_day_trips")) * 100, 2))
-            .otherwise(lit(None))
+        daily_stats["pct_change_trips"] = np.where(
+            (daily_stats["prev_day_trips"].notna()) & (daily_stats["prev_day_trips"] > 0),
+            ((daily_stats["daily_trips"] - daily_stats["prev_day_trips"]) / daily_stats["prev_day_trips"] * 100).round(2),
+            None
         )
 
-        # Flag anomalies - convert to boolean True/False instead of YES/NO
+        # Flag anomalies - convert to boolean True/False
         std_threshold = self.config.anomaly_std_threshold
         pct_threshold = self.config.anomaly_pct_change_threshold
 
-        anomaly_df = anomaly_df.withColumn(
-            "is_anomaly",
-            when(
-                (col("daily_trips") > col("avg_trips") + std_threshold * col("stddev_trips")) |
-                (col("daily_trips") < col("avg_trips") - std_threshold * col("stddev_trips")) |
-                (col("pct_change_trips") < pct_threshold) |
-                (col("avg_passenger_count") > 2),  # New condition: avg passenger count > 2
-                lit(True)
-            ).otherwise(lit(False))
+        daily_stats["is_anomaly"] = (
+            (daily_stats["daily_trips"] > daily_stats["avg_trips"] + std_threshold * daily_stats["stddev_trips"]) |
+            (daily_stats["daily_trips"] < daily_stats["avg_trips"] - std_threshold * daily_stats["stddev_trips"]) |
+            (daily_stats["pct_change_trips"] < pct_threshold) |
+            (daily_stats["avg_passenger_count"] > 2)
         )
 
-        result = (anomaly_df
-                  .select("pickup_date", "taxi_type", "daily_trips", "total_revenue_per_day",
-                         "avg_passenger_count", "avg_trips", "stddev_trips", "pct_change_trips", "is_anomaly")
-                  .withColumnRenamed("pickup_date", "date")
-                  .orderBy("date", "taxi_type"))
+        result = daily_stats[["pickup_date", "taxi_type", "daily_trips", "total_revenue_per_day",
+                             "avg_passenger_count", "avg_trips", "stddev_trips", "pct_change_trips", "is_anomaly"]]
+        result = result.rename(columns={"pickup_date": "date"})
+        result = result.sort_values(["date", "taxi_type"])
 
         # Standardize date format to YYYY-MM-DD
         return standardize_date_column(result, "date")
@@ -643,7 +617,7 @@ class AggregationEngine:
         self.strategies.append(strategy)
         return self
 
-    def compute_all(self, df: DataFrame, week_name: str = "") -> Dict[str, Tuple[DataFrame, str]]:
+    def compute_all(self, df: pd.DataFrame, week_name: str = "") -> Dict[str, Tuple[pd.DataFrame, str]]:
         """
         Execute all registered aggregation strategies.
 
@@ -666,7 +640,7 @@ class AggregationEngine:
                 result_df = strategy.compute(df)
                 csv_filename = strategy.get_csv_filename(week_name)
                 results[name] = (result_df, csv_filename)
-                self.logger.info(f"✓ {name} completed ({result_df.count():,} rows)")
+                self.logger.info(f"✓ {name} completed ({len(result_df):,} rows)")
                 self.logger.info(f"  Output: {csv_filename}")
             except Exception as e:
                 raise AggregationError(f"Failed to compute {name}: {e}") from e
@@ -686,7 +660,7 @@ class OutputManager:
         self.config = config
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
-    def save_csv(self, df: DataFrame, csv_filename: str, display_name: str) -> None:
+    def save_csv(self, df: pd.DataFrame, csv_filename: str, display_name: str) -> None:
         """
         Save DataFrame to CSV with display.
 
@@ -698,15 +672,16 @@ class OutputManager:
         self.logger.info(f"Saving {display_name} to {csv_filename}")
 
         # Display sample
-        df.show(10, truncate=False)
+        print(df.head(10).to_string(index=False))
+        print()
 
         # Save to CSV
         output_path = self.config.output_dir / csv_filename
-        df.coalesce(1).write.mode("overwrite").option("header", "true").csv(str(output_path))
+        df.to_csv(output_path, index=False)
 
         self.logger.info(f"✓ {display_name} saved to {output_path}")
 
-    def save_all(self, results: Dict[str, Tuple[DataFrame, str]]) -> None:
+    def save_all(self, results: Dict[str, Tuple[pd.DataFrame, str]]) -> None:
         """
         Save all aggregation results to CSV files.
 
@@ -736,28 +711,8 @@ class NYCTaxiPipeline:
         """
         self.config = config or PipelineConfig()
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-        self.spark: Optional[SparkSession] = None
 
-    def _create_spark_session(self, jdbc_path: str) -> SparkSession:
-        """Create and configure Spark session with JDBC driver."""
-        self.logger.info("Initializing Spark session")
-
-        builder = SparkSession.builder.appName(self.config.app_name)
-
-        if self.config.adaptive_execution:
-            builder = builder.config("spark.sql.adaptive.enabled", "true")
-
-        # Add JDBC driver to Spark classpath
-        builder = builder.config("spark.jars", jdbc_path)
-        builder = builder.config("spark.driver.extraClassPath", jdbc_path)
-
-        spark = builder.getOrCreate()
-        spark.sparkContext.setLogLevel(self.config.log_level)
-
-        self.logger.info("✓ Spark session created with PostgreSQL JDBC driver")
-        return spark
-
-    def run(self, jdbc_path: str) -> None:
+    def run(self) -> None:
         """
         Execute the complete ETL pipeline.
 
@@ -767,20 +722,14 @@ class NYCTaxiPipeline:
         3. Clean data
         4. Compute aggregations
         5. Save results to CSV
-
-        Args:
-            jdbc_path: Path to PostgreSQL JDBC driver JAR file
         """
         try:
-            # Initialize Spark
-            self.spark = self._create_spark_session(jdbc_path)
-
             # Step 1: Load data from PostgreSQL
             self.logger.info("=" * 70)
             self.logger.info("STEP 1: LOADING DATA FROM POSTGRESQL")
             self.logger.info("=" * 70)
 
-            loader = DataLoader(self.spark, self.config)
+            loader = DataLoader(self.config)
             all_trips_df = loader.load_from_postgres(self.config.postgres_table)
 
             # Step 2: Add trip duration
@@ -798,13 +747,10 @@ class NYCTaxiPipeline:
                 else:
                     raise DataValidationError("No dropoff datetime column found")
 
-                all_trips_df = all_trips_df.withColumn(
-                    "trip_duration_minutes",
-                    spark_round(
-                        (unix_timestamp(dropoff_col) - unix_timestamp("pickup_datetime")) / 60,
-                        2
-                    )
-                )
+                all_trips_df["trip_duration_minutes"] = (
+                    (pd.to_datetime(all_trips_df[dropoff_col]) -
+                     pd.to_datetime(all_trips_df["pickup_datetime"])).dt.total_seconds() / 60
+                ).round(2)
                 self.logger.info("✓ Trip duration calculated")
             else:
                 self.logger.info("✓ Trip duration already exists in data")
@@ -853,40 +799,6 @@ class NYCTaxiPipeline:
         except Exception as e:
             self.logger.error(f"Unexpected error: {e}")
             raise PipelineError(f"Pipeline execution failed: {e}") from e
-        finally:
-            if self.spark:
-                self.logger.info("Stopping Spark session")
-                self.spark.stop()
-
-
-# ============================================================================
-# JDBC DRIVER MANAGEMENT
-# ============================================================================
-
-def download_postgres_jdbc() -> str:
-    """
-    Download PostgreSQL JDBC driver if not present.
-
-    Returns:
-        Path to JDBC driver JAR file
-    """
-    import urllib.request
-
-    root_dir = Path(__file__).resolve().parent
-    jdbc_dir = root_dir / "jdbc"
-    jdbc_file = jdbc_dir / "postgresql-42.6.0.jar"
-
-    if jdbc_file.exists():
-        return str(jdbc_file)
-
-    print("Downloading PostgreSQL JDBC driver...")
-    jdbc_dir.mkdir(exist_ok=True)
-
-    jdbc_url = "https://jdbc.postgresql.org/download/postgresql-42.6.0.jar"
-    urllib.request.urlretrieve(jdbc_url, str(jdbc_file))
-
-    print(f"✓ JDBC driver downloaded to: {jdbc_file}\n")
-    return str(jdbc_file)
 
 
 # ============================================================================
@@ -923,11 +835,6 @@ def main():
     print("█" * 70 + "\n")
 
     try:
-        # Download JDBC driver
-        logger.info("Downloading PostgreSQL JDBC driver")
-        jdbc_path = download_postgres_jdbc()
-        logger.info(f"JDBC driver ready: {jdbc_path}")
-
         # Create config with specified table
         logger.info(f"Creating pipeline configuration for table: {args.table}")
         config = PipelineConfig(postgres_table=args.table)
@@ -937,7 +844,7 @@ def main():
         pipeline = NYCTaxiPipeline(config)
 
         logger.info("Starting pipeline execution")
-        pipeline.run(jdbc_path)
+        pipeline.run()
 
         logger.info("=" * 70)
         logger.info("NYC TAXI DATA PIPELINE - COMPLETED SUCCESSFULLY")
